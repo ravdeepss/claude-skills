@@ -1,0 +1,270 @@
+{
+  "$schema": "https://webapp-registry.internal/schema/v1.0.0/app-spec.json",
+  "specVersion": "1.0.0",
+  "generatedAt": "2026-04-22T00:00:00Z",
+  "generator": "app-spec-skill@v1",
+  "_comment": "EXAMPLE — abridged from ike-saas (multi-tenant Supabase SaaS). Shows how the shape flexes when there is no Express API: the `api` section becomes `dataLayer`, RLS replaces application-level auth filtering, and there's a `testEnvironment` block describing the in-app mock layer.",
+
+  "parentSpec": {
+    "name": "task-dashboard (ike-tasks OSS)",
+    "relation": "feature-parity-baseline",
+    "note": "This SaaS preserves the OSS v1 feature set and adds SaaS primitives: auth, workspaces, realtime sync, billing (billing is out of regression-test scope in v1 of this spec)."
+  },
+
+  "app": {
+    "id": "ike-saas",
+    "name": "Ike Tasks SaaS",
+    "version": "0.0.0",
+    "description": "Multi-tenant, web-first rebuild of ike-tasks (GTD + Eisenhower-matrix task manager) delivered as commercial SaaS. Feature parity with OSS Ike v1 plus Supabase-backed auth, workspace-scoped RLS, realtime multi-tab sync, and a first-class MCP server (MCP out of scope for this spec).",
+    "repository": "/sessions/jolly-eloquent-bell/mnt/ike-saas",
+    "license": "Private, unreleased",
+    "authors": [{ "name": "Rav", "email": "ravdeepss@gmail.com" }],
+    "tags": ["task-management", "saas", "supabase", "multi-tenant"]
+  },
+
+  "architecture": {
+    "pattern": "supabase-backed-spa-monorepo",
+    "description": "pnpm monorepo. apps/web is a Vite + React 19 SPA that talks directly to Supabase (PostgREST + GoTrue + Realtime). apps/mcp-server is a Cloudflare Workers MCP endpoint (out of regression-test scope). packages/shared holds TS types, generated db-types, a natural-date parser, and constants. supabase/ holds SQL migrations and Edge Functions.",
+    "deployment": {
+      "strategy": "multi-host",
+      "web": { "host": "Vercel", "buildCommand": "pnpm --filter @ike/web build", "startDev": "pnpm dev:web", "devUrl": "http://localhost:5173" },
+      "mcp": { "host": "Cloudflare Workers", "outOfScopeForRegression": true },
+      "db":  { "host": "Supabase (Postgres 15 + GoTrue + Realtime + Storage)" }
+    },
+    "directories": {
+      "root": ".",
+      "web": "apps/web/",
+      "mcpServer": "apps/mcp-server/",
+      "shared": "packages/shared/",
+      "migrations": "supabase/migrations/",
+      "edgeFunctions": "supabase/functions/",
+      "docs": "docs/"
+    }
+  },
+
+  "technology": {
+    "runtime": { "name": "Node.js", "requiredVersion": ">=20", "packageManager": "pnpm@9" },
+    "client": {
+      "framework": "React",
+      "version": "^19.0.0",
+      "language": "TypeScript (strict)",
+      "bundler": "Vite",
+      "entryPoint": "apps/web/src/main.tsx",
+      "rootComponent": "apps/web/src/App.tsx",
+      "port": 5173,
+      "dependencies": {
+        "react": "^19.x",
+        "react-dom": "^19.x",
+        "react-router-dom": "^6.x",
+        "@tanstack/react-query": "^5.x",
+        "@supabase/supabase-js": "^2.x",
+        "tailwindcss": "^3.x",
+        "@ike/shared": "workspace:*"
+      },
+      "stateManagement": "TanStack Query v5 (server state) + React hooks (local UI state). No Redux/Zustand.",
+      "routing": "react-router-dom v6",
+      "styling": "Tailwind CSS utility classes with dark/light theme via data-theme attribute on <html>"
+    },
+    "backend": {
+      "kind": "supabase-managed",
+      "components": [
+        { "name": "PostgREST", "purpose": "Auto-generated REST over every table; frontend uses supabase-js." },
+        { "name": "GoTrue",    "purpose": "Email/password + OAuth (Google/GitHub) auth; JWT sessions." },
+        { "name": "Realtime",  "purpose": "WebSocket pub/sub of postgres_changes scoped to workspace channels." },
+        { "name": "Storage",   "purpose": "Avatars, YAML exports." },
+        { "name": "Edge Functions", "purpose": "summary-report, yaml-export, stripe-webhook, mcp-oauth-bridge, purge-soft-deleted, daily-digest-email." }
+      ],
+      "authenticationModel": "JWT (1 hr access / 30 day refresh). RLS policies are the authorization layer; frontend does NOT filter by user/workspace in application code — it relies on RLS."
+    },
+    "database": {
+      "engine": "PostgreSQL 15",
+      "rlsEnabled": true,
+      "extensions": ["pg_cron", "pgvector"],
+      "features": ["Row Level Security on every user-data table", "Soft-delete with 30-day purge", "Audit log via triggers to activity_log", "Per-workspace realtime channels"]
+    }
+  },
+
+  "database": {
+    "engine": "PostgreSQL",
+    "schemaSourceOfTruth": "docs/SCHEMA.md",
+    "enums": {
+      "task_status":   ["PENDING", "INPROGRESS", "COMPLETED", "DONE", "CANCELLED", "NOT_DOING"],
+      "task_priority": ["low", "medium", "high", "urgent"],
+      "task_quadrant": ["do", "schedule", "delegate", "eliminate"],
+      "workspace_role":["owner", "admin", "member"],
+      "workspace_plan":["free", "pro"]
+    },
+    "standardColumns": [
+      { "name": "id",         "type": "uuid",        "primaryKey": true, "default": "gen_random_uuid()" },
+      { "name": "created_at", "type": "timestamptz", "default": "now()" },
+      { "name": "updated_at", "type": "timestamptz", "default": "now()" }
+    ],
+    "softDeletePattern": { "column": "deleted_at", "type": "timestamptz nullable", "purgeAfterDays": 30, "appliesTo": ["projects", "tasks", "task_templates"] },
+    "tables": [
+      {
+        "name": "workspaces",
+        "description": "Top-level tenant container. Every user-data row is scoped to exactly one workspace.",
+        "columns": [
+          { "name": "id",             "type": "uuid",           "primaryKey": true },
+          { "name": "name",           "type": "text",           "nullable": false },
+          { "name": "slug",           "type": "text",           "nullable": false, "unique": true },
+          { "name": "owner_user_id",  "type": "uuid",           "foreignKey": { "table": "auth.users", "column": "id" } },
+          { "name": "plan",           "type": "workspace_plan", "default": "'free'" }
+        ]
+      },
+      {
+        "name": "tasks",
+        "description": "User-visible tasks. RLS restricts rows to workspaces the current user belongs to.",
+        "columns": [
+          { "name": "id",            "type": "uuid",         "primaryKey": true },
+          { "name": "workspace_id",  "type": "uuid",         "foreignKey": { "table": "workspaces", "column": "id", "onDelete": "CASCADE" }, "nullable": false },
+          { "name": "project_id",    "type": "uuid",         "foreignKey": { "table": "projects",   "column": "id", "onDelete": "CASCADE" }, "nullable": false },
+          { "name": "title",         "type": "text",         "nullable": false },
+          { "name": "status",        "type": "task_status",  "default": "'PENDING'" },
+          { "name": "priority",      "type": "task_priority","nullable": true },
+          { "name": "quadrant",      "type": "task_quadrant","nullable": true },
+          { "name": "progress",      "type": "smallint",     "default": 0 },
+          { "name": "pinned",        "type": "boolean",      "default": false },
+          { "name": "sort_order",    "type": "integer",      "default": 0 },
+          { "name": "deleted_at",    "type": "timestamptz",  "nullable": true }
+        ],
+        "rls": "USING (workspace_id IN (SELECT f_current_workspaces()))",
+        "triggers": ["touch_updated_at", "log_activity"]
+      },
+      { "_note": "truncated — real spec enumerates 11 tables including workspace_members, projects, subtasks, task_notes, tags, task_tags, task_templates, activity_log, pomodoro_sessions." }
+    ]
+  },
+
+  "dataLayer": {
+    "description": "Client-side TypeScript modules that wrap supabase-js calls. No Express; the browser talks to Supabase PostgREST directly. These modules are what frontend components import.",
+    "location": "apps/web/src/data/",
+    "modules": [
+      { "file": "apps/web/src/data/workspaces.ts", "tables": ["workspaces", "workspace_members"],            "purpose": "Current user's workspaces, role resolution, switching active workspace." },
+      { "file": "apps/web/src/data/projects.ts",   "tables": ["projects"],                                    "purpose": "CRUD + soft-delete + archive for projects." },
+      { "file": "apps/web/src/data/tasks.ts",      "tables": ["tasks"],                                       "purpose": "CRUD + pin / reorder / move across projects; subscribes to realtime task events." },
+      { "file": "apps/web/src/data/subtasks.ts",   "tables": ["subtasks"],                                    "purpose": "Subtask CRUD." },
+      { "file": "apps/web/src/data/tags.ts",       "tables": ["tags", "task_tags"],                           "purpose": "Tag CRUD + tag attach/detach." },
+      { "file": "apps/web/src/data/pomodoro.ts",   "tables": ["pomodoro_sessions"],                           "purpose": "Start / complete / cancel pomodoros." },
+      { "_note": "truncated — real spec enumerates ~10 modules." }
+    ]
+  },
+
+  "frontend": {
+    "entryPoint": "apps/web/src/main.tsx",
+    "rootComponent": "apps/web/src/App.tsx",
+    "routes": [
+      { "path": "/login",          "component": "SignInPage",         "access": "public" },
+      { "path": "/signup",         "component": "SignUpPage",         "access": "public" },
+      { "path": "/forgot",         "component": "ForgotPasswordPage", "access": "public" },
+      { "path": "/reset",          "component": "ResetPasswordPage",  "access": "public" },
+      { "path": "/auth/callback",  "component": "EmailVerifyCallback","access": "public" },
+      { "path": "/",               "component": "Dashboard",          "access": "authenticated" },
+      { "path": "/settings",       "component": "SettingsPage",       "access": "authenticated" }
+    ],
+    "viewModes": [
+      { "id": "all-tasks", "label": "All Tasks", "component": "AllTasksView" },
+      { "id": "matrix",    "label": "Matrix",    "component": "MatrixView" },
+      { "id": "kanban",    "label": "Kanban",    "component": "KanbanView" },
+      { "id": "summary",   "label": "Summary",   "component": "SummaryView" }
+    ],
+    "components": [
+      { "name": "App",                   "file": "apps/web/src/App.tsx" },
+      { "name": "RequireAuth",           "file": "apps/web/src/auth/RequireAuth.tsx" },
+      { "name": "AuthenticatedShell",    "file": "apps/web/src/layout/AuthenticatedShell.tsx" },
+      { "name": "Dashboard",             "file": "apps/web/src/pages/Dashboard.tsx" },
+      { "name": "PomodoroTimer",         "file": "apps/web/src/components/PomodoroTimer.tsx" },
+      { "_note": "truncated" }
+    ],
+    "hooks": [
+      { "name": "useAuth",               "file": "apps/web/src/hooks/useAuth.ts" },
+      { "name": "useActiveWorkspace",    "file": "apps/web/src/hooks/useActiveWorkspace.ts" },
+      { "name": "useRealtimeWorkspace",  "file": "apps/web/src/hooks/useRealtimeWorkspace.ts" }
+    ],
+    "keyboardShortcuts": [
+      { "keys": "Ctrl+N", "action": "Quick-add task" },
+      { "keys": "Ctrl+K", "action": "Command palette" }
+    ],
+    "localStorageKeys": [
+      { "key": "ike_activeWorkspaceId", "purpose": "Currently selected workspace", "format": "uuid string" },
+      { "key": "ike_theme",             "purpose": "Theme choice",                 "format": "'light' | 'dark' | 'system'" },
+      { "key": "ike_activeView",        "purpose": "Last selected view",           "format": "view id string" }
+    ]
+  },
+
+  "features": [
+    {
+      "id": "auth",
+      "name": "Authentication",
+      "description": "Supabase GoTrue auth: email/password sign-in & sign-up, password reset, email-verify callback, session persistence across reloads.",
+      "entryPoints": ["apps/web/src/pages/SignInPage.tsx", "apps/web/src/pages/SignUpPage.tsx", "apps/web/src/hooks/useAuth.ts"],
+      "dataLayer": ["apps/web/src/lib/supabase.ts"],
+      "schemaTables": ["auth.users (managed by GoTrue)"],
+      "routes": ["/login", "/signup", "/forgot", "/reset", "/auth/callback"],
+      "dependencies": [],
+      "acceptanceCriteria": [
+        "Valid credentials redirect to /.",
+        "Invalid credentials show an inline error without clearing the email field.",
+        "Session survives a page reload and is picked up by RequireAuth."
+      ],
+      "tags": ["saas-primitive", "core"],
+      "status": "implemented"
+    },
+    {
+      "id": "workspaces",
+      "name": "Workspaces",
+      "description": "Every user has at least one workspace; tasks/projects/etc. are scoped to a workspace via RLS. Active workspace is persisted in localStorage.",
+      "entryPoints": ["apps/web/src/hooks/useActiveWorkspace.ts", "apps/web/src/layout/WorkspaceSwitcher.tsx"],
+      "dataLayer": ["apps/web/src/data/workspaces.ts"],
+      "schemaTables": ["workspaces", "workspace_members"],
+      "dependencies": ["auth"],
+      "acceptanceCriteria": [
+        "New sign-up auto-creates a 'Personal' workspace and a workspace_members row with role=owner.",
+        "Switching workspaces re-queries all workspace-scoped data.",
+        "RLS blocks any direct query for a workspace the user isn't a member of."
+      ],
+      "tags": ["saas-primitive", "core"],
+      "status": "implemented"
+    },
+    {
+      "id": "realtime-sync",
+      "name": "Realtime Multi-Tab Sync",
+      "description": "Changes made in one tab propagate to other open tabs of the same workspace within ~1 s via Supabase Realtime (postgres_changes).",
+      "entryPoints": ["apps/web/src/hooks/useRealtimeWorkspace.ts"],
+      "dataLayer": ["apps/web/src/data/tasks.ts", "apps/web/src/data/projects.ts"],
+      "schemaTables": ["tasks", "projects"],
+      "dependencies": ["auth", "workspaces"],
+      "acceptanceCriteria": [
+        "Creating a task in tab A appears in tab B without manual refresh.",
+        "Deleting a task in A removes it from B.",
+        "Events from OTHER workspaces are not received."
+      ],
+      "tags": ["saas-primitive"],
+      "status": "implemented"
+    },
+    { "_note": "truncated — real spec enumerates 24 features (the 20 OSS features plus auth, workspaces, realtime-sync, and a placeholder for billing)." }
+  ],
+
+  "testEnvironment": {
+    "strategy": "in-app-mock-supabase",
+    "mockLayer": {
+      "file": "apps/web/src/lib/mockSupabase.ts",
+      "envFlag": "VITE_USE_MOCK_SUPABASE=true",
+      "fixturesPath": "apps/web/public/__mock-fixtures/",
+      "globals": "window.__mockDb (in-memory JS store) and window.__mockRealtime (EventEmitter)"
+    },
+    "authMock": {
+      "credentials": { "email": "email@test.local", "password": "password123" },
+      "behavior": "useAuth returns a canned session; no real JWT is issued."
+    },
+    "realtimeMock": "EventEmitter in-process + BroadcastChannel for multi-tab scenarios.",
+    "timeMock": "Playwright clock.install() for pomodoro / due-date tests."
+  },
+
+  "outOfScopeForRegressionV1": [
+    "apps/mcp-server/**",
+    "supabase/functions/stripe-webhook",
+    "Real OAuth providers (Google/GitHub)",
+    "Email delivery (daily-digest-email, password-reset emails)",
+    "Billing"
+  ]
+}

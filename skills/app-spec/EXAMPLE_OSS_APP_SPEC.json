@@ -1,0 +1,217 @@
+{
+  "$schema": "https://webapp-registry.internal/schema/v1.0.0/app-spec.json",
+  "specVersion": "1.0.0",
+  "generatedAt": "2026-02-26T00:00:00Z",
+  "generator": "ai-codebase-analyzer",
+  "_comment": "EXAMPLE — abridged from ike-tasks (OSS client-server monorepo). Use as a reference for shape, not content. Sections trimmed for readability; a real spec is typically 3-5x this size.",
+
+  "app": {
+    "id": "task-dashboard",
+    "name": "Task Dashboard",
+    "version": "1.0.0",
+    "description": "A full-stack GTD-inspired task management dashboard with project organization, Kanban boards, priority matrix, Pomodoro timer, subtasks, tagging, and activity tracking.",
+    "repository": "/home/user/TaskDashboard",
+    "license": null,
+    "authors": [],
+    "tags": ["task-management", "gtd", "kanban", "pomodoro", "productivity"]
+  },
+
+  "architecture": {
+    "pattern": "client-server-monorepo",
+    "description": "Monorepo with separate client/ and server/ directories. Express API with SQLite serves a React SPA. Client proxies API calls to server during development.",
+    "deployment": {
+      "strategy": "local-process",
+      "startCommand": "./start-dashboard.sh",
+      "stopCommand": "./stop-dashboard.sh"
+    },
+    "directories": {
+      "root": ".",
+      "server": "server/",
+      "client": "client/",
+      "database": "tasks.db"
+    }
+  },
+
+  "technology": {
+    "runtime": { "name": "Node.js", "requiredVersion": ">=16" },
+    "server": {
+      "framework": "Express",
+      "version": "^4.18.2",
+      "language": "JavaScript (CommonJS)",
+      "entryPoint": "server/index.js",
+      "port": 3001,
+      "dependencies": {
+        "express": "^4.18.2",
+        "cors": "^2.8.5",
+        "better-sqlite3": "^11.0.0",
+        "js-yaml": "^4.1.0"
+      }
+    },
+    "client": {
+      "framework": "React",
+      "version": "^18.2.0",
+      "language": "JavaScript (JSX)",
+      "bundler": "react-scripts (CRA) 5.0.1",
+      "entryPoint": "client/src/index.jsx",
+      "port": 3000,
+      "proxy": "http://localhost:3001",
+      "stateManagement": "React useState / useCallback hooks (no external state library)",
+      "routing": "none (single-page view switching via state)"
+    },
+    "database": {
+      "engine": "SQLite",
+      "driver": "better-sqlite3@^11.0.0",
+      "filePath": "tasks.db",
+      "pragmas": ["foreign_keys = ON"],
+      "features": ["synchronous API", "transactions", "auto-migration on startup"]
+    }
+  },
+
+  "database": {
+    "engine": "SQLite",
+    "schemaSourceOfTruth": "server/db.js",
+    "tables": [
+      {
+        "name": "projects",
+        "description": "Project containers that group tasks.",
+        "columns": [
+          { "name": "code", "type": "TEXT", "primaryKey": true },
+          { "name": "name", "type": "TEXT", "nullable": false },
+          { "name": "description", "type": "TEXT", "nullable": true },
+          { "name": "status", "type": "TEXT", "enumValues": ["In Progress", "Completed", "Archived"] }
+        ]
+      },
+      {
+        "name": "tasks",
+        "description": "Individual task items belonging to projects.",
+        "columns": [
+          { "name": "id", "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+          { "name": "project_code", "type": "TEXT", "nullable": false, "foreignKey": { "table": "projects", "column": "code", "onDelete": "CASCADE" } },
+          { "name": "task_number", "type": "INTEGER", "nullable": false },
+          { "name": "title", "type": "TEXT", "nullable": false },
+          { "name": "status", "type": "TEXT", "default": "PENDING", "enumValues": ["PENDING", "INPROGRESS", "COMPLETED", "DONE", "CANCELLED", "NOT DOING"] },
+          { "name": "priority", "type": "TEXT", "enumValues": ["HIGH", "MEDIUM", "LOW"] },
+          { "name": "quadrant", "type": "TEXT", "enumValues": ["DO FIRST", "SCHEDULE", "DELEGATE", "ELIMINATE"] },
+          { "name": "progress", "type": "INTEGER", "default": 0 },
+          { "name": "deleted_at", "type": "TEXT", "nullable": true },
+          { "name": "pinned", "type": "INTEGER", "default": 0 },
+          { "name": "sort_order", "type": "INTEGER", "default": 0 }
+        ],
+        "uniqueConstraints": [{ "columns": ["project_code", "task_number"] }]
+      },
+      { "_note": "truncated — real spec enumerates all 8 tables: projects, tasks, subtasks, notes, tags, task_tags, templates, activity_log" }
+    ]
+  },
+
+  "api": {
+    "baseUrl": "http://localhost:3001/api",
+    "endpoints": [
+      { "method": "GET",    "path": "/projects",                  "purpose": "List all projects" },
+      { "method": "POST",   "path": "/projects",                  "purpose": "Create a project" },
+      { "method": "GET",    "path": "/projects/:code/tasks",      "purpose": "List tasks in project" },
+      { "method": "POST",   "path": "/projects/:code/tasks",      "purpose": "Create a task in project" },
+      { "method": "PATCH",  "path": "/tasks/:id",                 "purpose": "Update task fields" },
+      { "method": "DELETE", "path": "/tasks/:id",                 "purpose": "Soft-delete a task" },
+      { "method": "POST",   "path": "/tasks/:id/pin",             "purpose": "Toggle pinned flag" },
+      { "method": "POST",   "path": "/tasks/:id/subtasks",        "purpose": "Create a subtask" },
+      { "method": "POST",   "path": "/pomodoro/start",            "purpose": "Start a pomodoro session" },
+      { "method": "POST",   "path": "/pomodoro/complete",         "purpose": "Mark current pomodoro complete" },
+      { "_note": "truncated — real spec enumerates 40+ endpoints" }
+    ]
+  },
+
+  "frontend": {
+    "entryPoint": "client/src/index.jsx",
+    "rootComponent": "client/src/App.jsx",
+    "routes": [],
+    "viewModes": [
+      { "id": "all-tasks",   "label": "All Tasks",    "component": "TaskListView" },
+      { "id": "matrix",      "label": "Matrix",       "component": "EisenhowerMatrix" },
+      { "id": "kanban",      "label": "Kanban",       "component": "KanbanBoard" },
+      { "id": "summary",     "label": "Summary",      "component": "SummaryView" }
+    ],
+    "components": [
+      { "name": "App",              "file": "client/src/App.jsx" },
+      { "name": "TaskListView",     "file": "client/src/components/TaskListView.jsx" },
+      { "name": "KanbanBoard",      "file": "client/src/components/KanbanBoard.jsx" },
+      { "name": "EisenhowerMatrix", "file": "client/src/components/EisenhowerMatrix.jsx" },
+      { "name": "PomodoroTimer",    "file": "client/src/components/PomodoroTimer.jsx" },
+      { "name": "QuickAdd",         "file": "client/src/components/QuickAdd.jsx" }
+    ],
+    "hooks": [
+      { "name": "useTasks",      "file": "client/src/hooks/useTasks.js" },
+      { "name": "usePomodoro",   "file": "client/src/hooks/usePomodoro.js" }
+    ],
+    "keyboardShortcuts": [
+      { "keys": "Ctrl+N",  "action": "Quick-add task" },
+      { "keys": "Ctrl+1",  "action": "Switch to All Tasks view" },
+      { "keys": "Ctrl+2",  "action": "Switch to Matrix view" },
+      { "keys": "Ctrl+K",  "action": "Open command palette" }
+    ],
+    "localStorageKeys": [
+      { "key": "task-dashboard.theme",       "purpose": "Light/dark theme",        "format": "'light' | 'dark'" },
+      { "key": "task-dashboard.activeView",  "purpose": "Last selected view",      "format": "view id string" },
+      { "key": "task-dashboard.pomodoro",    "purpose": "In-flight pomodoro state","format": "JSON { startAt, durationMs }" }
+    ]
+  },
+
+  "features": [
+    {
+      "id": "project-crud",
+      "name": "Project CRUD",
+      "description": "Create, rename, archive, and delete projects. A project is a named container for tasks with a lifecycle status.",
+      "entryPoints": ["client/src/components/ProjectList.jsx"],
+      "api": ["GET /projects", "POST /projects", "PATCH /projects/:code", "DELETE /projects/:code"],
+      "schemaTables": ["projects"],
+      "dependencies": [],
+      "userStories": [
+        "As a user, I can create a new project with a unique code and name.",
+        "As a user, I can archive a completed project without deleting its tasks."
+      ],
+      "acceptanceCriteria": [
+        "Creating a project with a duplicate code returns 409.",
+        "Deleting a project cascades to its tasks (soft-delete)."
+      ],
+      "tags": ["core"],
+      "status": "implemented"
+    },
+    {
+      "id": "task-crud",
+      "name": "Task CRUD",
+      "description": "Create tasks inside a project, edit title/status/priority/due-date, and soft-delete. Task numbers are sequential within a project.",
+      "entryPoints": ["client/src/components/TaskListView.jsx", "client/src/components/TaskEditor.jsx"],
+      "api": ["POST /projects/:code/tasks", "PATCH /tasks/:id", "DELETE /tasks/:id"],
+      "schemaTables": ["tasks"],
+      "dependencies": ["project-crud"],
+      "acceptanceCriteria": [
+        "Creating a task assigns the next sequential task_number within the project.",
+        "PATCH updates only fields present in the body; omitted fields are untouched.",
+        "DELETE sets deleted_at but keeps the row (soft-delete)."
+      ],
+      "tags": ["core"],
+      "status": "implemented"
+    },
+    {
+      "id": "pomodoro-timer",
+      "name": "Pomodoro Timer",
+      "description": "A 25/5-minute focus timer attached to a task. Logs completed sessions to activity_log.",
+      "entryPoints": ["client/src/components/PomodoroTimer.jsx", "client/src/hooks/usePomodoro.js"],
+      "api": ["POST /pomodoro/start", "POST /pomodoro/complete", "POST /pomodoro/cancel"],
+      "schemaTables": ["activity_log"],
+      "dependencies": ["task-crud"],
+      "acceptanceCriteria": [
+        "Starting a second pomodoro while one is active is rejected (or auto-cancels the first — pick one and document).",
+        "A refreshed page rehydrates the active pomodoro from localStorage.",
+        "Completion writes an activity_log entry of type 'pomodoro.complete'."
+      ],
+      "tags": ["productivity"],
+      "status": "implemented"
+    },
+    { "_note": "truncated — real spec enumerates 20 features (matrix, kanban, summary, subtasks, notes, tags, search, templates, quick-add, inbox, review-mode, keyboard-shortcuts, theme, activity-log, undo, favicon, natural-date, yaml-export, summary-report, snooze)" }
+  ],
+
+  "outOfScopeForRegressionV1": [
+    "server/scripts/* (maintenance scripts)",
+    "YAML export round-trip"
+  ]
+}
