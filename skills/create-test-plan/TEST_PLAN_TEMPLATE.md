@@ -1,4 +1,4 @@
-# <PROJECT NAME> — <NAME>_TEST_PLAN.md Template
+# {PROJECT NAME} — {NAME}_TEST_PLAN.md Template
 
 > Fill in every placeholder below. Delete this top comment block when saving.
 > File name on disk: `<NAME>_TEST_PLAN.md` at the project root.
@@ -6,9 +6,9 @@
 
 ---
 
-# <Project Title> — Test Plan
+# {Project Title} — Test Plan
 
-> **Purpose:** <one-sentence purpose — what this plan delivers, e.g. "Playwright regression coverage for the <app> web UI, executable by a capable-tier agent under the test→fix→retest loop.">
+> **Purpose:** {one-sentence purpose — what this plan delivers, e.g. "Playwright regression coverage for the <app} web UI, executable by a capable-tier agent under the test→fix→retest loop.">
 > Each task is self-contained and designed to be handed to a worker agent.
 > Phase 0 must complete before any feature phase starts.
 
@@ -18,23 +18,23 @@
 
 Non-negotiable choices every worker must respect. Fill every line.
 
-- **Target app:** `<path-to-app-or-package>` — built on <stack summary>.
+- **Target app:** `<path-to-app-or-package>` — built on {stack summary}.
 - **Source of truth for features:** `app-spec.json` at `<path>` — drives the coverage matrix below.
-- **Test runner:** <Playwright / Cypress / Puppeteer / Vitest-browser / other>, version `<x.y>`. Browser(s): <chromium / chromium+webkit / all>.
-- **Mock strategy:** <in-app-mock | route-interception | real-db-ephemeral | hybrid>. See the Mock Layer section for the file path / env flag / fixture location.
-- **Auth strategy in tests:** <bypass via stored state | mock-auth-client returns canned session | `/test/login` backdoor | real test user>. Test credentials: <email / password or "N/A — bypass">.
-- **Realtime handling in tests:** <EventEmitter + BroadcastChannel | Supabase realtime via docker | out of scope>.
-- **Time mock:** <Playwright `clock.install()` / `vi.useFakeTimers()` / native | not used>.
-- **Selector policy:** primary = <`getByRole` / `data-testid` / other>. Secondary fallback = <...>. Raw CSS classes are BANNED. `nth-child` is BANNED.
+- **Test runner:** {Playwright / Cypress / Puppeteer / Vitest-browser / other}, version `<x.y>`. Browser(s): {chromium / chromium+webkit / all}.
+- **Mock strategy:** {in-app-mock | route-interception | real-db-ephemeral | hybrid}. See the Mock Layer section for the file path / env flag / fixture location.
+- **Auth strategy in tests:** {bypass via stored state | mock-auth-client returns canned session | `/test/login` backdoor | real test user}. Test credentials: {email / password or "N/A — bypass"}.
+- **Realtime handling in tests:** {EventEmitter + BroadcastChannel | Supabase realtime via docker | out of scope}.
+- **Time mock:** {Playwright `clock.install()` / `vi.useFakeTimers()` / native | not used}.
+- **Selector policy:** primary = {`getByRole` / `data-testid` / other}. Secondary fallback = {...}. Raw CSS classes are BANNED. `nth-child` is BANNED.
 - **Banned APIs (enforced by lint):** `page.waitForTimeout`, `cy.wait(<ms>)`, blanket `setTimeout`-based waits in helpers.
 - **Fixture convention:** named fixtures at `<path>/{seed,empty,heavy}.json`. Each test declares which one it uses.
-- **Artifact policy:** trace on failure, screenshot on failure, video <always / on failure / off>. Output path: `<test-results/ | cypress/videos/ | other>`.
+- **Artifact policy:** trace on failure, screenshot on failure, video {always / on failure / off}. Output path: `<test-results/ | cypress/videos/ | other>`.
 - **Tagging taxonomy:** `@phase-<N>` + `@<feature-id>` + `@<type>` where type ∈ {smoke, happy, error, edge, realtime}. Tags appear both in task headers below and in the spec files the worker writes.
 - **Single-test command:** `<exact command with --grep placeholder>` (e.g. `pnpm test:e2e -- --grep "<fragment>" --reporter=list`).
 - **Whole-suite command:** `<exact command>`.
 - **Typecheck command:** `<exact command>`.
 - **Lint command:** `<exact command>`.
-- **Do-not-touch files:** <list, e.g. migrations, generated types, the plan file, `app-spec.json`, out-of-scope subsystem directories>.
+- **Do-not-touch files:** {list, e.g. migrations, generated types, the plan file, `app-spec.json`, out-of-scope subsystem directories}.
 - **Budget knobs for `test-runner`:** `MAX_ATTEMPTS=<3>`, `MAX_FIXES_PER_RUN=<10>`, `MAX_WALL_TIME_MIN=<30>`.
 
 ---
@@ -76,11 +76,11 @@ Every feature from `app-spec.features[]` must have a row. Task IDs here must mat
 
 | Feature id | Smoke | Happy path | Error path | Edge | Realtime | Total tasks |
 |---|---|---|---|---|---|---|
-| <feature-a> | <0.?>      | <1.1>      | <1.2>      | <1.3>        | —        | 3 |
-| <feature-b> | —          | <2.1>      | <2.2>      | <2.3>        | —        | 3 |
-| <feature-c> | —          | <3.1>      | —          | <3.2>        | <5.1>    | 3 |
-| <feature-d> | —          | —          | —          | —            | —        | 0 — (out of scope: <reason>) |
-| **Total**   |            |            |            |              |          | **<N>** |
+| {feature-a} | {0.?}      | {1.1}      | {1.2}      | {1.3}        | —        | 3 |
+| {feature-b} | —          | {2.1}      | {2.2}      | {2.3}        | —        | 3 |
+| {feature-c} | —          | {3.1}      | —          | {3.2}        | {5.1}    | 3 |
+| {feature-d} | —          | —          | —          | —            | —        | 0 — (out of scope: {reason}) |
+| **Total**   |            |            |            |              |          | **{N}** |
 
 Empty cells where the column applies = missing coverage. Fix before calling the plan done.
 
@@ -112,7 +112,7 @@ Every Phase 0 task is `capable` tier unless marked otherwise.
 **Spec / Changes:** `<list every file/config worker may need to fix; e.g. "ensure apps/web/package.json is complete and parses">`. Do not scope-creep into feature fixes — only what prevents boot.
 
 **Tier:** capable
-**Suggested model:** <Sonnet, GLM-4>
+**Suggested model:** {Sonnet, GLM-4}
 
 **Acceptance criteria:**
 1. `<install command>` completes with exit 0.
@@ -123,12 +123,12 @@ Every Phase 0 task is `capable` tier unless marked otherwise.
 
 ### Task 0.2 — Install test runner + config + lint
 
-**Goal:** <e.g. "Install Playwright, generate config, add an ESLint rule that bans waitForTimeout.">
+**Goal:** {e.g. "Install Playwright, generate config, add an ESLint rule that bans waitForTimeout."}
 
 **Spec / Changes:** exact package names, exact config file paths, lint rule snippet.
 
 **Tier:** capable
-**Suggested model:** <Sonnet, Qwen-Coder-32B>
+**Suggested model:** {Sonnet, Qwen-Coder-32B}
 
 **Acceptance criteria:**
 1. `<install command>` exits 0 and adds the runner to `package.json`.
@@ -144,7 +144,7 @@ Every Phase 0 task is `capable` tier unless marked otherwise.
 **Spec / Changes:** file at `<path>`; exports match the shape of the real client; env-flag swap at `<swap file path>`; globals attached to `window` in dev/test mode only.
 
 **Tier:** capable
-**Suggested model:** <Sonnet, GLM-4>
+**Suggested model:** {Sonnet, GLM-4}
 
 **Acceptance criteria:**
 1. When `<ENV>=true`, `<app-entry>` loads the mock instead of the real client (verified by a `window.__mockDb` truthy check in dev).
@@ -163,7 +163,7 @@ Every Phase 0 task is `capable` tier unless marked otherwise.
 - `heavy.json` — one user, one workspace, ~10 projects, ~500 tasks (for list-perf and virtualization).
 
 **Tier:** cheap (pure data authoring)
-**Suggested model:** <Haiku, Qwen-Coder-7B>
+**Suggested model:** {Haiku, Qwen-Coder-7B}
 
 **Acceptance criteria:**
 1. Each file is valid JSON and conforms to the schema.
@@ -179,7 +179,7 @@ Every Phase 0 task is `capable` tier unless marked otherwise.
 **Spec / Changes:** folder `<tests/e2e/pages/>`, files `<list them — DashboardPage.ts, AuthPage.ts, etc.>`. Each page exposes methods for the actions tests will call. No raw CSS in page-objects.
 
 **Tier:** capable
-**Suggested model:** <Sonnet, GLM-4>
+**Suggested model:** {Sonnet, GLM-4}
 
 **Acceptance criteria:**
 1. Each file exports a class with a constructor taking the runner's Page handle.
@@ -195,7 +195,7 @@ Every Phase 0 task is `capable` tier unless marked otherwise.
 **Spec / Changes:** file `<path>`, function signature `signIn(page, { email?, password? })`. Behavior matches the Architecture-Decisions auth strategy.
 
 **Tier:** capable
-**Suggested model:** <Sonnet>
+**Suggested model:** {Sonnet}
 
 **Acceptance criteria:**
 1. Calling `signIn(page)` with no args completes in < 2 s using the default test credentials / bypass.
@@ -208,10 +208,10 @@ Every Phase 0 task is `capable` tier unless marked otherwise.
 
 **Goal:** Time-mock helper + realtime event-injection helper.
 
-**Spec / Changes:** <list exact helpers, e.g. `installClock()`, `emitRealtime(type, payload)`>.
+**Spec / Changes:** {list exact helpers, e.g. `installClock()`, `emitRealtime(type, payload)`}.
 
 **Tier:** capable
-**Suggested model:** <Sonnet>
+**Suggested model:** {Sonnet}
 
 **Acceptance criteria:**
 1. A demo test uses `installClock()` and `page.clock.runFor(25 * 60_000)` to advance through a 25-minute interval.
@@ -219,7 +219,7 @@ Every Phase 0 task is `capable` tier unless marked otherwise.
 
 ---
 
-## Phase 1 — <first feature cluster, e.g. Auth>  (requires Phase 0 ✅)
+## Phase 1 — {first feature cluster, e.g. Auth}  (requires Phase 0 ✅)
 
 ### Task 1.1 — auth: smoke
 
@@ -247,7 +247,7 @@ Every Phase 0 task is `capable` tier unless marked otherwise.
 **Tags:** `@phase-1 @auth @smoke`
 
 **Tier:** cheap
-**Suggested model:** <Haiku, Qwen-Coder-7B>
+**Suggested model:** {Haiku, Qwen-Coder-7B}
 
 **Acceptance criteria:**
 1. The spec file exists at the path above with one `test()` block titled "auth sign-in page renders".
@@ -259,25 +259,25 @@ Every Phase 0 task is `capable` tier unless marked otherwise.
 
 ### Task 1.2 — auth: happy sign-in
 
-<same macro, fill from the coverage matrix>
+{same macro, fill from the coverage matrix}
 
 ---
 
 ### Task 1.3 — auth: error path (bad credentials)
 
-<same macro>
+{same macro}
 
 ---
 
 ### Task 1.4 — auth: session persistence edge
 
-<same macro — reload mid-session, expect to land on authenticated route, not `/login`>
+{same macro — reload mid-session, expect to land on authenticated route, not `/login`}
 
 ---
 
-## Phase 2 — <second feature cluster>  (requires Phase 1 ✅ or parallel, see graph)
+## Phase 2 — {second feature cluster}  (requires Phase 1 ✅ or parallel, see graph)
 
-<repeat the feature-phase structure above — one task per cell in the coverage matrix>
+{repeat the feature-phase structure above — one task per cell in the coverage matrix}
 
 ---
 
@@ -285,12 +285,12 @@ Every Phase 0 task is `capable` tier unless marked otherwise.
 
 These are not fully specced. Flesh them out when the scheduled phases are done. Each should correspond to an entry in `app-spec.outOfScopeForRegressionV1` or a testing concern beyond v1.
 
-- **Real-DB smoke lane:** <1–2 sentence description>
-- **Accessibility audit:** <1–2 sentence description>
-- **Visual regression:** <1–2 sentence description>
-- **MCP server tests:** <1–2 sentence description>
-- **Billing / Stripe webhooks:** <1–2 sentence description>
-- **OAuth providers:** <1–2 sentence description>
+- **Real-DB smoke lane:** {1–2 sentence description}
+- **Accessibility audit:** {1–2 sentence description}
+- **Visual regression:** {1–2 sentence description}
+- **MCP server tests:** {1–2 sentence description}
+- **Billing / Stripe webhooks:** {1–2 sentence description}
+- **OAuth providers:** {1–2 sentence description}
 
 ---
 

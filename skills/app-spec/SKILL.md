@@ -1,6 +1,6 @@
 ---
 name: app-spec
-description: Generate a new `app-spec.json` from scratch, or update an existing one, for any software project. Use when the user says "create an app-spec", "generate app-spec.json", "document this codebase as a spec", "write a machine-readable spec for this app", "refresh the app-spec", "update the spec — the code changed", "make an app-spec for ike-tasks / ike-saas / <project>", or passes a repo path and asks for a structured feature/architecture snapshot. Produces a single JSON file at the project root that downstream skills (notably `create-test-plan` and `test-runner`) consume as the feature catalogue and architecture-of-record. Works for any stack — OSS client-server, SaaS multi-tenant, CLI, library — by adapting which sections are populated.
+description: Generate a new `app-spec.json` from scratch, or update an existing one, for any software project. Use when the user says "create an app-spec", "generate app-spec.json", "document this codebase as a spec", "write a machine-readable spec for this app", "refresh the app-spec", "update the spec — the code changed", "make an app-spec for ike-tasks / ike-saas / {project}", or passes a repo path and asks for a structured feature/architecture snapshot. Produces a single JSON file at the project root that downstream skills (notably `create-test-plan` and `test-runner`) consume as the feature catalogue and architecture-of-record. Works for any stack — OSS client-server, SaaS multi-tenant, CLI, library — by adapting which sections are populated.
 ---
 
 # App Spec
@@ -200,7 +200,7 @@ Walk through:
 4. Does `schemaSourceOfTruth` point at a file that actually exists?
 5. Are all router paths in `frontend.routes` present in the code?
 6. Does `outOfScopeForRegressionV1` match what the user told you in intake?
-7. Does `testEnvironment.mockLayer.file` exist, or is it listed as "to be created by <task>"?
+7. Does `testEnvironment.mockLayer.file` exist, or is it listed as "to be created by {task}"?
 8. Is `generatedAt` current?
 
 ### 6. Save & summarize
@@ -209,7 +209,7 @@ Write to `<project-root>/app-spec.json`. Show the user:
 
 - Path (`computer://` link if in Cowork).
 - One-paragraph summary: number of tables, number of features, architectural pattern, any sections omitted.
-- A suggestion: *"Feed this to `create-test-plan` to generate a regression plan for all <N> features."*
+- A suggestion: *"Feed this to `create-test-plan` to generate a regression plan for all {N} features."*
 
 ## Mode B — UPDATE workflow
 

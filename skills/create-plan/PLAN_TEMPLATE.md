@@ -1,4 +1,4 @@
-# <PROJECT NAME> — <NAME>_PLAN.md Template
+# {PROJECT NAME} — {NAME}_PLAN.md Template
 
 > Fill in every placeholder below. Delete this top comment block when saving.
 > File name on disk: `<NAME>_PLAN.md` at the project root.
@@ -6,9 +6,9 @@
 
 ---
 
-# <Project Title> — Plan
+# {Project Title} — Plan
 
-> **Purpose:** <one-sentence purpose — what this plan delivers>
+> **Purpose:** {one-sentence purpose — what this plan delivers}
 > Each task is self-contained and designed to be handed to a worker agent.
 > Tasks within a phase are sequential unless the Task Dependency Graph says otherwise.
 > Phases can overlap EXCEPT Phase 0, which must complete before any other phase starts.
@@ -69,9 +69,9 @@ which costs tokens. Prefer narrow, high-signal files.
 
 ## Phase 0 — Foundation  (must complete before all other phases)
 
-### Task 0.1 — <short imperative name>
+### Task 0.1 — {short imperative name}
 
-**Goal:** <one sentence — what this task achieves>
+**Goal:** {one sentence — what this task achieves}
 
 **Spec / Changes:**
 
@@ -79,47 +79,47 @@ which costs tokens. Prefer narrow, high-signal files.
 blocks for snippets the worker should produce or match. Call out every "do not touch"
 boundary. Include UI copy verbatim.>
 
-**Implementation notes:** <library picks, algorithm hints, pitfalls — optional>
+**Implementation notes:** {library picks, algorithm hints, pitfalls — optional}
 
 **Tier:** cheap | capable | heavy
-**Suggested model:** <e.g. "Haiku, Qwen-Coder-7B" or "Sonnet, GLM-4, Codex">
+**Suggested model:** {e.g. "Haiku, Qwen-Coder-7B" or "Sonnet, GLM-4, Codex"}
 
 **Acceptance criteria:**
 
-1. <Observable check 1 — something a human or verifier can confirm>
-2. <Observable check 2>
-3. <...>
+1. {Observable check 1 — something a human or verifier can confirm}
+2. {Observable check 2}
+3. {...}
 
 ---
 
-### Task 0.2 — <name>
+### Task 0.2 — {name}
 
-<same structure>
-
----
-
-## Phase 1 — <Name>  (requires Phase 0 ✅)
-
-### Task 1.1 — <name>
-
-<same structure>
+{same structure}
 
 ---
 
-## Phase 2 — <Name>  (requires Phase 0 ✅; parallel to Phase 1)
+## Phase 1 — {Name}  (requires Phase 0 ✅)
 
-### Task 2.1 — <name>
+### Task 1.1 — {name}
 
-<same structure>
+{same structure}
+
+---
+
+## Phase 2 — {Name}  (requires Phase 0 ✅; parallel to Phase 1)
+
+### Task 2.1 — {name}
+
+{same structure}
 
 ---
 
 ## Phase N — Optional / Future
 
-These are not fully specced. Flesh them out when Phases 0–<last> are done.
+These are not fully specced. Flesh them out when Phases 0–{last} are done.
 
-- **<Idea 1>:** <1–2 sentence description>
-- **<Idea 2>:** <1–2 sentence description>
+- **{Idea 1}:** {1–2 sentence description}
+- **{Idea 2}:** {1–2 sentence description}
 
 ---
 

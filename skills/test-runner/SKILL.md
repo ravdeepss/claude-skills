@@ -1,6 +1,6 @@
 ---
 name: test-runner
-description: Execute an E2E / regression test plan (or a named subset) using the test → investigate → fix → retest loop. Use when the user says "run regression tests", "run the test plan", "run feature X tests", "test → fix until green", "regression check for <feature>", names a specific task ID from a `*_TEST_PLAN.md` file (e.g. "run task 2.3"), or passes a feature id from the project's `app-spec.json` (e.g. "run @pomodoro-timer"). Designed to be invoked by a capable worker agent (GLM-4 / GLM 5.1, Sonnet, or similar) that has access to Read, Edit, Write, Bash, and Grep tools. Loops autonomously with a bounded retry budget until specified tests pass or an escalation threshold is hit. Project-agnostic — works with any test runner (Playwright, Cypress, Puppeteer, Vitest-browser, etc.) and any mock strategy, as long as the plan file documents them.
+description: Execute an E2E / regression test plan (or a named subset) using the test → investigate → fix → retest loop. Use when the user says "run regression tests", "run the test plan", "run feature X tests", "test → fix until green", "regression check for {feature}", names a specific task ID from a `*_TEST_PLAN.md` file (e.g. "run task 2.3"), or passes a feature id from the project's `app-spec.json` (e.g. "run @pomodoro-timer"). Designed to be invoked by a capable worker agent (GLM-4 / GLM 5.1, Sonnet, or similar) that has access to Read, Edit, Write, Bash, and Grep tools. Loops autonomously with a bounded retry budget until specified tests pass or an escalation threshold is hit. Project-agnostic — works with any test runner (Playwright, Cypress, Puppeteer, Vitest-browser, etc.) and any mock strategy, as long as the plan file documents them.
 ---
 
 # Test Runner
@@ -237,7 +237,7 @@ If the user passes none, use defaults. If they override one, use their value.
 
 ## Interaction rules
 
-- Announce scope at the start: *"Running <scope>. Budget: <MAX_ATTEMPTS> attempts/test, <MAX_FIXES> total fixes, <MAX_WALL_TIME> min."*
+- Announce scope at the start: *"Running {scope}. Budget: {MAX_ATTEMPTS} attempts/test, {MAX_FIXES} total fixes, {MAX_WALL_TIME} min."*
 - Between tests, print one line: `[<n>/<total>] <test-title> — attempt <k>: <classification> → <fix-or-retest>`.
 - Do NOT ask clarifying questions mid-loop. Only ask at the start, during escalation, or when classification is E.
 - NEVER ask "should I continue?" after every fix. That's not autonomous.

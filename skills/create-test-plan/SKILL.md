@@ -1,11 +1,11 @@
 ---
 name: create-test-plan
-description: Author a detailed `<NAME>_TEST_PLAN.md` for regression / E2E / integration testing of an existing app, to be executed task-by-task by worker agents under the Master-Orchestrator → Worker pattern and then driven through the red→green loop by the `test-runner` skill. Use when the user says "create a test plan", "write a regression test plan", "plan the E2E tests for this app", "break down testing into tasks for agents", "scaffold a TEST_PLAN.md", "plan Playwright / Cypress coverage for my app", or any request to structure test work so it can be dispatched to cheaper models and then executed against a live codebase. Specialized sibling of `create-plan` — the two share the phase / tier / dependency-graph format, but `create-test-plan` adds a mandatory coverage matrix, per-feature task macro, mock-strategy intake, and explicit coupling to `test-runner` as the execution counterpart.
+description: Author a detailed `{NAME}_TEST_PLAN.md` for regression / E2E / integration testing of an existing app, to be executed task-by-task by worker agents under the Master-Orchestrator → Worker pattern and then driven through the red→green loop by the `test-runner` skill. Use when the user says "create a test plan", "write a regression test plan", "plan the E2E tests for this app", "break down testing into tasks for agents", "scaffold a TEST_PLAN.md", "plan Playwright / Cypress coverage for my app", or any request to structure test work so it can be dispatched to cheaper models and then executed against a live codebase. Specialized sibling of `create-plan` — the two share the phase / tier / dependency-graph format, but `create-test-plan` adds a mandatory coverage matrix, per-feature task macro, mock-strategy intake, and explicit coupling to `test-runner` as the execution counterpart.
 ---
 
 # Create Test Plan
 
-You are a principal-engineer-level **test architect**. Your job: interview the user about an app that exists (or is being built) and needs regression coverage, then emit a `<NAME>_TEST_PLAN.md` at the project root that:
+You are a principal-engineer-level **test architect**. Your job: interview the user about an app that exists (or is being built) and needs regression coverage, then emit a `{NAME}_TEST_PLAN.md` at the project root that:
 
 1. `plan-runner` can walk task-by-task to scaffold the suite and author specs.
 2. `test-runner` can then execute to get and keep the suite green.
@@ -96,7 +96,7 @@ Once intake is done, read the full spec. You'll use:
 
 Use `TEST_PLAN_TEMPLATE.md` (in this skill's folder) as the skeleton. Don't invent new section names — `test-runner` parses the template's exact shape.
 
-File name: `<NAME>_TEST_PLAN.md` where `<NAME>` reflects scope (e.g. `REGRESSION_TEST_PLAN.md`, `E2E_TEST_PLAN.md`, `CHECKOUT_E2E_PLAN.md`). Confirm naming with the user.
+File name: `{NAME}_TEST_PLAN.md` where `<NAME>` reflects scope (e.g. `REGRESSION_TEST_PLAN.md`, `E2E_TEST_PLAN.md`, `CHECKOUT_E2E_PLAN.md`). Confirm naming with the user.
 
 ### 4. Build the coverage matrix (mandatory)
 
