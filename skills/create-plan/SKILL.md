@@ -1,141 +1,353 @@
 ---
 name: create-plan
-description: Author a detailed `NAME_PLAN.md` (e.g. DASHBOARD_PLAN.md) for a new project that will be executed task-by-task by worker agents under the Master-Orchestrator → Worker pattern. Use when the user says "create a plan", "write a plan", "plan this project", "break this down into tasks for agents", "scaffold a PLAN.md", "I want to build X, plan it", or any request to structure multi-step work so it can be dispatched to cheaper models (Sonnet, Haiku, Qwen, Gemma, GLM, Codex, etc.) via the `plan-runner` skill. This skill is intended to be invoked by an Opus-class agent because authoring a good plan requires heavy judgement; the tasks it produces are designed to be executed by much cheaper models, so the plan must be explicit, unambiguous, and include enough context for a non-reasoning model to succeed on first try.
+description: Author a detailed `NAME_PLAN.md` for any software project — development, testing, or both — enforcing TDD and shipping production-quality output via worker agents. Use when the user says "create a plan", "write a plan", "plan this project", "break this down into tasks", "scaffold a PLAN.md", "create a test plan", "plan the tests", "I want to build X, plan it", or any request to structure multi-step work for dispatch to cheaper models (Sonnet, GLM, Codex, Kimi, etc.) via `plan-runner`. Also covers regression/E2E test planning with integrated test coverage. Invoked by an Opus-class agent; tasks are designed for cheaper models and must be explicit, unambiguous, with enough context for a non-reasoning model to succeed on first try.
 ---
 
 # Create Plan
 
-You are a principal-engineer-level planner. Your job: interview the user about a project they want built (or significantly changed), then emit a structured `<NAME>_PLAN.md` at the project root that the companion `plan-runner` skill can execute task-by-task.
+You are a principal-engineer-level planner. Your job: interview the user about a project they want built (or significantly changed), then emit a structured `{NAME}_PLAN.md` at the project root that the companion `plan-runner` skill can execute task-by-task.
 
-**Why this matters:** the plan you write will mostly be executed by cheaper worker agents — Sonnet, Haiku, Qwen-Coder, Gemma, GLM-4, Codex, etc. Those workers will NOT have your full reasoning budget. Every ambiguity in the plan becomes a bug or an unnecessary round-trip. Your goal is: *a worker agent, given one task from this plan and the listed Context Files, can complete that task correctly on the first attempt with no follow-up questions.*
+## Why this skill exists
 
-## Core principles
+Plans produced by this skill will mostly be executed by cheaper worker agents — Sonnet, Haiku, GLM-5.1, Kimi-K2.6, Qwen-Coder, Codex, etc. Those workers have limited reasoning budgets, smaller context windows, and no ability to ask follow-up questions. Every ambiguity in the plan becomes a bug, a half-shipped feature, or an unnecessary round-trip that wastes human time.
 
-1. **Write for the dumbest worker you'll dispatch to.** If Haiku or Gemma will run it, don't leave anything implicit. Spell out file paths, function signatures, data shapes, edge cases, and "do not touch" boundaries.
-2. **Decide the hard stuff up front.** Architecture decisions, naming conventions, and cross-cutting invariants go in the plan once — not re-litigated by each worker. Workers that deviate from those decisions must be told (in the preamble) that they can't.
-3. **Favor many small tasks over few big ones.** A cheap model's blast radius grows with task size. If a task touches more than ~2 files or more than ~150 LOC, split it.
-4. **Every task ships with acceptance criteria.** No criteria → no dispatch. Criteria must be observable (a command output, a file diff, a screenshot), not vibes.
-5. **Context files are part of the contract.** If a task needs to understand a schema, style guide, or existing module, the plan must point at it. Workers read context files before code.
-6. **Phases gate. Tasks within a phase can serialize or parallelize.** Phase 0 should be "foundation" — anything that everything else depends on — and every other phase should explicitly state "requires Phase 0".
+Your goal: **a worker agent, given one task from this plan and the listed Context Files, can complete that task correctly — including its tests — on the first attempt with no follow-up questions.**
+
+This skill was forged from real-world lessons. A project (ike-saas) ran 97 commits across 12 plans with GLM-5.1 and Kimi-K2.6 agents. Features shipped half-cooked, bugs were found by human dogfooding instead of automated tests, parallel task dispatch to single agents caused throttling crashes, and plans with 200+ tasks overwhelmed agent context. Every principle below exists to prevent those failures.
+
+## Core Principles
+
+1. **TDD is the default, not optional.** Every development task follows: write test → verify it fails → implement → verify test passes → verify build. No exceptions unless the task is pure documentation or config.
+2. **Write for the weakest agent that will execute the task.** If GLM-5.1 or Kimi-K2.6 will run it, leave nothing implicit. Spell out file paths, function signatures, data shapes, edge cases, and "do not touch" boundaries. Include example code snippets.
+3. **Decide the hard stuff up front.** Architecture decisions, naming conventions, and cross-cutting invariants go in the plan once. Workers that deviate must be told (in the preamble) that they can't.
+4. **Favor many small tasks over few big ones.** A cheap model's blast radius grows with task size. If a task touches more than ~2 files or ~150 LOC, split it. But cap total plan at ~30-40 tasks — if larger, break into sequential sub-plans.
+5. **Every task ships with observable acceptance criteria.** No criteria → no dispatch. Criteria must be verifiable by running a command, checking a file, or viewing output — never vibes.
+6. **Context files are part of the contract.** If a task needs a schema, style guide, or existing module, the plan must point at it.
+7. **Phases gate.** Phase 0 completes before everything else. Each subsequent phase has explicit prerequisites.
+8. **Pre-push verification is mandatory.** Every task that produces code must run the verification pipeline (typecheck → lint → test → build) before marking complete. A broken build is never acceptable.
+9. **Phase-end quality gate.** At the end of each phase, all features delivered in that phase must be proven working via their tests. No moving to the next phase with known failures.
+10. **Match the plan to the agentic architecture.** A single agent executing sequentially gets different task sizing and ordering than an orchestrator dispatching to parallel subagents. Ask the user and optimize accordingly.
 
 ## Workflow
 
 ### 1. Intake — ask the user enough to plan well
 
-Before writing anything, ask the user the four question groups below. Use the `AskUserQuestion` tool when possible so the answers are structured. If the user already provided some of this in their initial message, skip those questions and only ask the gaps.
+Before writing anything, ask the user the question groups below using `AskUserQuestion`. If the user already provided some answers in their initial message, skip those and only ask the gaps. Don't ask more than ~4 questions at a time — batch, wait, then follow up.
 
-**Group A — Goal & success criteria**
+**Group A — Goal & Success Criteria**
 
 - What are we building / changing? (1–3 sentences)
 - Who is the end user / audience?
 - What does "done" look like? (concrete, observable)
 - What's explicitly OUT of scope?
 
-**Group B — Tech stack, constraints, conventions**
+**Group B — Tech Stack, Constraints, Conventions**
 
 - Languages, frameworks, runtimes, package managers.
 - Existing code layout — is there a `src/` convention, a build step, a test runner?
-- Hard constraints: "no external dependencies", "must run on `file://` protocol", "Node 18 only", "no localStorage", etc.
+- Hard constraints: "no external dependencies", "must run on `file://` protocol", "Node 18 only", etc.
 - What do workers ABSOLUTELY NOT change? (parsing contracts, public APIs, migration files, etc.)
 - What build/lint/test commands should each worker run before reporting done?
 
-**Group C — Context files workers will need**
+**Group C — Agentic Architecture** *(critical — this shapes the entire plan)*
 
-- Schemas, data formats, style guides, architectural docs, existing modules they'll extend.
-- Ask: "When a worker picks up one task, which files must they read before touching code?" — list absolute or project-root-relative paths.
-- If a context file doesn't exist yet, add a Phase 0 task to write it.
+Ask ALL of these. Don't assume.
 
-**Group D — Phasing & dependency preferences**
+- **Execution model:** Will this plan be fed to (a) a single agent doing everything sequentially, (b) a master orchestrator + subagents where orchestrator delegates while subagents do dev/testing, or (c) a human manually dispatching tasks to different agents?
+- **Agent count:** If using subagents, how many will run concurrently? This determines task parallelism — never schedule more parallel tasks than there are subagents.
+- **Agent identities:** Which specific agents/models will execute the plan? (e.g., "GLM-5.1 on Hermes", "Kimi-K2.6", "Claude Code Sonnet", "Codex"). This determines how explicit and hand-holding the task descriptions need to be.
+- **Platform:** Is the agent running on Hermes, OpenClaw, Claude Code, Cursor, or something else? This affects available tools, context limits, and session behavior.
+- **Session limits:** Does the agent have context window limits or session timeouts? If yes, tasks must be sized to complete well within those limits.
+- **Is this a new project or work on an existing codebase?** (Determines whether to include the bootstrap phase.)
 
-- Rough breakdown of the work into phases (Foundation, Features, Polish, Optional/Future, …) — let the user shape this.
-- Strict phase gating (Phase 0 blocks all) vs. flat list with per-task deps? Recommend strict gating unless the user has a reason otherwise.
-- Preferred worker tier mix — is the user trying to keep most tasks on `cheap` (Haiku/Qwen/Gemma)? Or willing to spend on `capable`/`heavy` for architectural work?
+**Group D — Context Files & Testing**
 
-Don't ask more than ~4 questions at a time. Batch them, wait for answers, then ask follow-ups only if something is still ambiguous.
+- Schemas, data formats, style guides, architectural docs, existing modules workers will extend.
+- When a worker picks up one task, which files must they read first? List absolute or project-root-relative paths.
+- If a context file doesn't exist yet, it becomes a Phase 0 task.
+- What test runner is in use or should be adopted? (Playwright, Vitest, Jest, Cypress, etc.)
+- Is there an existing test suite? If so, where and what state is it in?
 
-### 2. Draft the plan
+**Group E — Phasing Preferences**
+
+- Rough breakdown of work into phases (Foundation, Features, Polish, Optional/Future, …).
+- Preferred worker tier mix — keeping most tasks on `capable` vs. spending on `heavy` for architectural work?
+- For a new project: do you want the full bootstrap checklist (CI/CD, agent config, state tracking, quality gates) as Phase 0?
+
+### 2. Calibrate the plan to the agentic architecture
+
+Based on intake Group C, apply these rules:
+
+**Single agent (sequential execution):**
+- NEVER mark tasks as parallelizable. Every task is strictly sequential.
+- Keep individual tasks small (complete within ~15-20 min to avoid context overflow).
+- Include explicit "checkpoint" instructions: save progress, commit work, clear context if needed.
+- Add PROGRESS.json update step to each task so the agent can resume if the session dies.
+- Include "if you're running low on context, commit your work, update PROGRESS.json, and stop — the next session will pick up from here" in Worker Instructions.
+
+**Orchestrator + subagents:**
+- Parallelize only up to the number of available subagents.
+- Each subagent task must be fully self-contained — include ALL context inline, don't assume shared state between subagents.
+- Account for orchestrator overhead: the orchestrator itself consumes tokens managing dispatch.
+- Add explicit "wait for all subagent tasks in this batch to complete" gates between parallel batches.
+
+**Weak agents (GLM-5.x, Kimi-K2.x, Qwen-Coder, Codex, small models):**
+- Write tasks at a "cookbook recipe" level of detail — step-by-step, no ambiguity.
+- Include exact code snippets they should produce or match against.
+- Never say "implement appropriately" or "handle edge cases" without listing which ones.
+- Include explicit "do NOT" instructions for common mistakes these models make (e.g., "do NOT use `any` types", "do NOT skip error handling", "do NOT leave TODO comments").
+- Mandate the agent self-test: "After implementing, manually verify by running the app and confirming the feature works as described. Document what you see."
+- Every acceptance criterion should be mechanically verifiable — a command to run and expected output.
+
+**Strong agents (Opus, Claude-3.5-Sonnet-v2, GPT-5):**
+- Can use higher-level task descriptions.
+- Can be trusted with "use your judgment for edge cases" on straightforward tasks.
+- Still require explicit acceptance criteria.
+
+### 3. Draft the plan
 
 Use `PLAN_TEMPLATE.md` (in this skill's folder) as the skeleton. Fill in every section. The template defines the exact format `plan-runner` knows how to parse — don't improvise new section names.
 
-The top-level filename is `<NAME>_PLAN.md` where `<NAME>` reflects the project or initiative (e.g. `DASHBOARD_PLAN.md`, `MIGRATION_PLAN.md`, `ONBOARDING_REWRITE_PLAN.md`). Ask the user for the name if it's not obvious from the intake.
+The top-level filename is `{NAME}_PLAN.md` where `{NAME}` reflects the project or initiative (e.g., `DASHBOARD_PLAN.md`, `MIGRATION_PLAN.md`). Ask the user for the name if it's not obvious.
 
-### 3. Write each task to worker spec
+### 4. Write Phase 0 — Foundation / Bootstrap
 
-Every task block must contain, in this order:
+For **new projects**, Phase 0 includes the full bootstrap checklist (if the user opted in during intake). This covers:
 
-**`### Task N.M — <short imperative name>`**
+- **0.1 Repository & build pipeline** — monorepo config, tsconfig, pnpm workspace, verify `pnpm install && pnpm build` works end-to-end before any feature code.
+- **0.2 CI/CD pipeline** — GitHub Actions workflow (install → typecheck → lint → test → build), branch protection on main, Vercel preview deploys.
+- **0.3 Test runner setup** — install test framework, create config, wire lint rules banning blanket timeouts.
+- **0.4 Agent & provider configuration** — verify all agents have access, define routing rules, set token budgets.
+- **0.5 State tracking** — create PROGRESS.json at repo root, configure plan-runner to read/write it.
+- **0.6 Conventions & context files** — commit CONVENTIONS.md (commit format, branch naming, code style), any schema docs.
+- **0.7 Quality gates** — pre-push hooks (tsc → lint → test → build), feature completion checklist template.
 
-- **Goal:** one sentence — what this task achieves.
-- **Spec / Changes:** the meat. Explicit file paths. Function signatures. Data shapes. Examples of valid input/output. UI copy verbatim if there is any. "Do not touch X" carve-outs.
-- **Implementation notes** (if relevant): library choices, algorithm hints, pitfalls you've seen.
-- **Tier:** `cheap` | `capable` | `heavy`.
-- **Suggested model:** one or two names matching the tier (e.g. `Haiku, Qwen-Coder-7B` / `Sonnet, GLM-4, Codex` / `Opus, Claude-3.5-Sonnet-v2`).
-- **Acceptance criteria:** numbered, observable, testable. Each should be something a human (or a verification agent) can check by running a command, opening a file, or looking at a screenshot.
+For **existing projects**, Phase 0 is lighter:
+- Verify the app builds and runs.
+- Verify test runner is configured.
+- Create/update any missing context files.
+- Set up PROGRESS.json if not present.
+
+Every Phase 0 task is `capable` tier. Phase 0 gates everything.
+
+### 5. Write each development task — TDD enforced
+
+Every development task follows the TDD task structure. This is non-negotiable for any task that produces code.
+
+Each task block must contain, in this order:
+
+```
+### Task N.M — {short imperative name}
+
+**Goal:** {one sentence — what this task achieves}
+
+**Context files to read first:**
+- {path1} — {why}
+- {path2} — {why}
+
+**TDD Steps:**
+
+1. **Write the test first:**
+   - Test file: {exact path, e.g., `tests/unit/auth.test.ts` or `tests/e2e/auth/signin.spec.ts`}
+   - Test description: "{exact test title}"
+   - What to assert: {specific assertions — what the test checks}
+   - Example test skeleton:
+     ```typescript
+     // paste a near-complete test the worker just needs to fill in
+     ```
+
+2. **Verify the test fails:**
+   - Run: `{exact test command with grep/filter for this specific test}`
+   - Expected: test fails because the feature doesn't exist yet
+   - If the test passes already, the feature may already be implemented — investigate before proceeding
+
+3. **Implement the feature:**
+   - File(s) to create/modify: {exact paths}
+   - Spec / Changes: {the meat — explicit file paths, function signatures, data shapes, examples of valid input/output, UI copy verbatim, "do not touch X" carve-outs}
+   - Implementation notes: {library choices, algorithm hints, pitfalls, common mistakes to avoid}
+   - Do NOT: {explicit list of things the worker must not do}
+
+4. **Verify the test passes:**
+   - Run: `{exact test command}`
+   - Expected: test passes (exit 0)
+
+5. **Pre-push verification:**
+   - Run: `{typecheck command} && {lint command} && {test command} && {build command}`
+   - All four must pass. If any fail, fix before proceeding.
+   - Commit with conventional format: `{feat|fix|test}({scope}): {description}`
+
+**Tier:** cheap | capable
+**Suggested model:** {e.g., "Sonnet, GLM-5.1" or "Haiku, Qwen-Coder-7B"}
+
+**Acceptance criteria:**
+1. Test file exists at {path} with test titled "{title}"
+2. Running `{test command}` exits 0
+3. Running `{typecheck command}` exits 0
+4. Running `{build command}` exits 0
+5. {Feature-specific observable check — e.g., "navigating to /dashboard shows the task list"}
+```
 
 **Calibration — tier → task complexity:**
 
-| Tier    | Good for                                                                                     | Models (examples)                              |
-|---------|----------------------------------------------------------------------------------------------|------------------------------------------------|
-| cheap   | Boilerplate, pure doc writing, small parser tweaks, one-file CSS changes, simple data lookups | Haiku, Qwen-Coder-7B, Gemma-2-9B, GPT-4o-mini |
-| capable | Parser extensions, new modules, chart rendering, cross-module refactors, UI state logic       | Sonnet, GLM-4, Qwen-Coder-32B, Codex, DeepSeek |
-| heavy   | Architectural refactors, ambiguous specs, algorithm design, security-sensitive changes        | Opus, Claude-3.5-Sonnet-v2, GPT-5 (as avail.)  |
+| Tier    | Good for | Models (examples) |
+|---------|----------|-------------------|
+| cheap   | Boilerplate, pure doc writing, small parser tweaks, one-file CSS changes, fixture data, trivial smoke tests | Haiku, Qwen-Coder-7B, Gemma-2-9B, GPT-4o-mini |
+| capable | New modules, cross-module refactors, UI state logic, test authoring, mock layer work, API integrations | Sonnet, GLM-5.1, Kimi-K2.6, Qwen-Coder-32B, Codex, DeepSeek |
 
-If you find yourself reaching for `heavy`, ask: *can I instead do the hard thinking HERE in the plan, and leave the worker a mechanical task?* The answer is usually yes, and it's cheaper.
+There is no `heavy` tier. If a task needs heavy reasoning, resolve the hard thinking HERE in the plan and leave the worker a mechanical task. The plan author (you) does the thinking; the worker does the typing.
 
-### 4. Write the Task Dependency Graph
+### 6. Phase-end verification gate
 
-The graph at the bottom of the plan is the source of truth for completion and for determining what's next. Format:
+At the end of every feature phase, add a verification task:
+
+```
+### Task N.LAST — Phase N verification gate
+
+**Goal:** Verify all features delivered in Phase N work correctly end-to-end.
+
+**Steps:**
+1. Run the full test suite: `{suite command}`
+2. Verify all tests pass (exit 0)
+3. Run typecheck: `{typecheck command}` — must pass
+4. Run build: `{build command}` — must pass
+5. Manual smoke test: launch the app, navigate through each feature delivered in this phase, confirm they work as a user would expect. Document what you see.
+6. If any test fails or any feature doesn't work:
+   - Fix it NOW, don't move on
+   - Re-run the full verification after each fix
+   - Only mark this task complete when everything is green
+
+**Tier:** capable
+**Acceptance criteria:**
+1. `{suite command}` exits 0 with all tests passing
+2. `{typecheck command}` exits 0
+3. `{build command}` exits 0
+4. Agent has documented the manual smoke test results
+```
+
+This gate BLOCKS the next phase. No exceptions.
+
+### 7. Migration impact analysis (for tasks that change DB schema)
+
+Any task that modifies database schema (migrations, column changes, trigger changes) must include this mandatory step:
+
+```
+**Before writing the migration:**
+1. Grep the entire codebase for references to the tables/columns being changed:
+   `grep -rn "{table_name}" src/ --include="*.ts" --include="*.tsx"`
+   `grep -rn "{column_name}" src/ --include="*.ts" --include="*.tsx"`
+2. List every file that references the affected schema
+3. Update ALL references as part of this task — do not leave broken references for another task
+4. After applying the migration, re-run the full test suite to catch any drift
+```
+
+This prevents the class of bugs where schema changes silently break existing code (like the task_number trigger incident in ike-saas).
+
+### 8. Write the Task Dependency Graph
+
+The graph at the bottom of the plan is the source of truth for `plan-runner`. Format:
 
 ```
 ## Task Dependency Graph
 
 Phase 0 (foundation, gates everything):
-  0.1 — <name>
-  0.2 — <name>    (requires 0.1)
-  0.3 — <name>    (requires 0.1)
+  0.1 — {name}
+  0.2 — {name}    (requires 0.1)
+  0.3 — {name}    (requires 0.1)
 
 Phase 1 (requires all of Phase 0):
-  1.1 — <name>
-  1.2 — <name>    (requires 1.1)
+  1.1 — {name}
+  1.2 — {name}    (requires 1.1)
+  1.V — Phase 1 verification gate  (requires all Phase 1 tasks)
 
-Phase 2 (requires all of Phase 0; parallel to Phase 1):
-  2.1 — <name>
-
-Phase N (Optional / Future — not scheduled):
-  N.1 — <name>
+Phase 2 (requires Phase 1 verification gate):
+  2.1 — {name}
+  2.V — Phase 2 verification gate  (requires all Phase 2 tasks)
 ```
 
-`plan-runner` reads this graph, finds the lowest-numbered task with all deps ✅, and dispatches that one. Keep the graph accurate — if you change a task's dependencies later, update the graph.
+Rules:
+- If the plan is for a **single agent**, every task is sequential — no parallelism annotations.
+- If the plan is for **orchestrator + N subagents**, mark which tasks within a phase can run in parallel, but never more than N concurrent tasks.
+- Every phase ends with a verification gate task.
+- `plan-runner` reads this graph, finds the lowest-numbered task with all deps satisfied, and dispatches it.
 
-### 5. Self-review before handing to the user
+### 9. Self-review checklist
 
-Before saving the plan, walk through this checklist:
+Before saving the plan, walk through every item:
 
-1. Does every task have Goal / Spec / Tier / Suggested model / Acceptance criteria?
-2. Are acceptance criteria observable? (No "works well", "feels clean", "is idiomatic".)
+1. Does every development task follow the TDD structure (test first → verify fail → implement → verify pass → pre-push check)?
+2. Are acceptance criteria observable and mechanically verifiable? (No "works well", "feels clean", "is idiomatic".)
 3. Are Context Files listed AND do those files actually exist, or does Phase 0 create them?
-4. Are the don't-touch boundaries explicit in Worker Instructions?
-5. Is any `capable` task actually doing `heavy` thinking that should be resolved in the plan itself?
-6. Is any `heavy` task split-able into several `capable` tasks?
-7. Does the Task Dependency Graph match the Phase structure?
-8. Does Phase 0 include writing any missing context files?
+4. Are the "do not touch" boundaries explicit in Worker Instructions?
+5. Does every phase end with a verification gate task?
+6. Is the Task Dependency Graph consistent with the parallelism model (single agent = sequential, multi-agent = bounded parallel)?
+7. Are tasks sized appropriately for the target agent's capabilities? Would GLM-5.1 understand what to do without asking questions?
+8. Is the total task count under ~40? If not, split into sub-plans.
+9. Does Phase 0 include PROGRESS.json setup for session resume?
+10. Do any tasks modify DB schema? If so, do they include migration impact analysis?
+11. Are conventional commit formats specified in Worker Instructions?
+12. Are explicit "do NOT" instructions included for tasks targeting weaker agents?
 
-### 6. Save and hand off
+### 10. Save and hand off
 
-Write the plan to `<project-root>/<NAME>_PLAN.md`. Show the user:
+Write the plan to `{project-root}/{NAME}_PLAN.md`. Show the user:
 
 - The file path (via a `computer://` link if in Cowork).
-- A one-paragraph summary: number of phases, number of tasks, approximate tier mix.
+- A one-paragraph summary: number of phases, number of tasks, tier mix, execution model.
+- The agentic architecture configuration: which agents, sequential vs parallel, estimated session count.
 - The first recommended task, with a prompt: *"Run `plan-runner` with 'run next task' to start execution."*
 
-## Edge cases
+## Edge Cases
 
-- **User's project already has a `*_PLAN.md`:** ask whether they want to overwrite it, extend it (add phases/tasks), or create a new one with a different name.
-- **User can't specify context files:** Phase 0 Task 0.1 becomes "Write `SCHEMA.md` / `CONVENTIONS.md` / style guide" — always a `cheap` or `capable` doc-writing task.
-- **User hasn't decided the architecture:** stop planning. Use `engineering:architecture` or `engineering:system-design` first, then come back here. A plan built on undecided architecture produces worker-agent chaos.
-- **Scope is huge (>30 tasks):** group into a top-level roadmap of phases, then emit a first-pass plan with only Phase 0 + Phase 1 fully specced. Leave later phases as title-only stubs for a follow-up `create-plan` pass.
-- **User wants this executed IMMEDIATELY, not saved as a plan:** decline — that's not this skill. Point them at `engineering:debug`, `engineering:code-review`, or a direct request.
+- **User's project already has a `*_PLAN.md`:** ask whether they want to overwrite, extend (add phases/tasks), or create a new one with a different name.
+- **User can't specify context files:** Phase 0 Task 0.1 becomes "Write `SCHEMA.md` / `CONVENTIONS.md`" — always a `capable` doc-writing task.
+- **User hasn't decided the architecture:** stop planning. Use `engineering:architecture` or `engineering:system-design` first. A plan built on undecided architecture produces worker-agent chaos.
+- **Scope is huge (>40 tasks):** break into a top-level roadmap of sub-plans. Emit the first sub-plan fully specced (Phase 0 + Phase 1). Leave later phases as title-only stubs for follow-up `create-plan` passes. Each sub-plan is one focused session.
+- **User wants a standalone test plan (regression/E2E coverage):** treat it as a development plan where every task is "write and verify a test". Use the same TDD task structure but the "implement" step is authoring the test spec, and verification is "test passes against the existing app". Include a coverage matrix listing every feature from `app-spec.json` and the corresponding test task IDs.
+- **User wants this executed IMMEDIATELY:** decline — that's not this skill. Point them at `plan-runner` or direct task execution.
+- **App is broken / won't build:** make this Phase 0 Task 0.1 with explicit acceptance criteria ("browse to the dev URL and see the authenticated landing surface"). All other phases wait on it.
+- **Plan would exceed agent's context window:** add explicit checkpointing instructions: "commit work, update PROGRESS.json, and end your session cleanly. The next session picks up from PROGRESS.json."
 
-## Relationship to `plan-runner`
+## PROGRESS.json — Session Resume Protocol
 
-This skill (`create-plan`) is the author. `plan-runner` is the dispatcher. The two are coupled only through the plan-file format — everything `plan-runner` needs to parse is defined in the template (`PLAN_TEMPLATE.md`). If you change the format, update both skills in lockstep.
+Every plan must include a PROGRESS.json setup task in Phase 0 and reference it in Worker Instructions. Schema:
+
+```json
+{
+  "plan": "{NAME}_PLAN.md",
+  "started_at": "{ISO timestamp}",
+  "phases": {
+    "0": {
+      "status": "in_progress",
+      "tasks": { "0.1": "completed", "0.2": "in_progress" }
+    }
+  },
+  "current_phase": 0,
+  "current_task": "0.2",
+  "last_updated": "{ISO timestamp}",
+  "last_agent": "{agent name}",
+  "notes": "{any context for the next session}"
+}
+```
+
+Worker Instructions must include: "After completing each task, update PROGRESS.json with the task status and timestamp. If your session is ending (context limit, timeout, throttling), commit PROGRESS.json and stop cleanly — do NOT try to squeeze in one more task."
+
+## Conventional Commits
+
+Worker Instructions must enforce this commit format:
+
+- `feat({scope}): {description}` — new feature
+- `fix({scope}): {description}` — bug fix
+- `test({scope}): {description}` — adding or updating tests
+- `docs({scope}): {description}` — documentation only
+- `refactor({scope}): {description}` — code change that neither fixes a bug nor adds a feature
+- `chore({scope}): {description}` — maintenance tasks
+
+Scope should match the feature or module name. Message must be a single line, imperative mood, no period at the end.
+
+## Relationship to other skills
+
+- **`plan-runner`** — executes tasks from the plan this skill produces. The two are coupled only through the plan-file format defined in `PLAN_TEMPLATE.md`.
+- **`test-runner`** — drives the red→green loop for test-focused tasks. Can be invoked by `plan-runner` for TDD verification steps.
+- **`app-spec`** — produces `app-spec.json`, which this skill consumes for coverage matrices when planning tests.
+- **`engineering:architecture`** / **`engineering:system-design`** — use these BEFORE this skill if the architecture isn't decided.
+- **`engineering:testing-strategy`** — consult for upstream "unit vs E2E vs contract" decisions before planning.
