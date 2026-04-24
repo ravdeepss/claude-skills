@@ -275,26 +275,68 @@ Rules:
 Before saving the plan, walk through every item:
 
 1. Does every development task follow the TDD structure (test first → verify fail → implement → verify pass → pre-push check)?
-2. Are acceptance criteria observable and mechanically verifiable? (No "works well", "feels clean", "is idiomatic".)
-3. Are Context Files listed AND do those files actually exist, or does Phase 0 create them?
-4. Are the "do not touch" boundaries explicit in Worker Instructions?
-5. Does every phase end with a verification gate task?
-6. Is the Task Dependency Graph consistent with the parallelism model (single agent = sequential, multi-agent = bounded parallel)?
-7. Are tasks sized appropriately for the target agent's capabilities? Would GLM-5.1 understand what to do without asking questions?
-8. Is the total task count under ~40? If not, split into sub-plans.
-9. Does Phase 0 include PROGRESS.json setup for session resume?
-10. Do any tasks modify DB schema? If so, do they include migration impact analysis?
-11. Are conventional commit formats specified in Worker Instructions?
-12. Are explicit "do NOT" instructions included for tasks targeting weaker agents?
+2. Does Worker Instructions include the complete Quality Ritual (red → green → build gate → self-verify → commit → save learnings → update progress)?
+3. Are acceptance criteria observable and mechanically verifiable? (No "works well", "feels clean", "is idiomatic".)
+4. Are Context Files listed AND do those files actually exist, or does Phase 0 create them?
+5. Are the "do not touch" boundaries explicit in Worker Instructions?
+6. Does every phase end with a QA gate task? (This is implicit — never omit it.)
+7. Is the Task Dependency Graph consistent with the parallelism model (single agent = sequential, multi-agent = bounded parallel)?
+8. Are tasks sized appropriately for the target agent's capabilities? Would GLM-5.1 understand what to do without asking questions?
+9. Is the total task count under ~40? If not, split into sub-plans.
+10. Does Phase 0 include PROGRESS.json setup for session resume?
+11. Is the Session Resume section populated near the top of the plan (not buried at the bottom)?
+12. Do any tasks modify DB schema? If so, do they include migration impact analysis?
+13. Are conventional commit formats specified in Worker Instructions?
+14. Are explicit "do NOT" instructions included for tasks targeting weaker agents?
+15. Have you emitted the companion `{NAME}_CRON_PROMPT.md` file for auto-scheduled execution?
 
-### 10. Save and hand off
+### 10. Save the plan and emit the cron prompt
 
-Write the plan to `{project-root}/{NAME}_PLAN.md`. Show the user:
+Write the plan to `{project-root}/{NAME}_PLAN.md`.
 
-- The file path (via a `computer://` link if in Cowork).
+Then emit a companion file: `{project-root}/{NAME}_CRON_PROMPT.md`. This is a self-contained prompt that can be fed to a scheduled agent (cron job, Hermes schedule, OpenClaw task) to auto-execute the plan without human nudging. Contents:
+
+```markdown
+# Auto-execution prompt for {NAME}_PLAN.md
+
+You are a plan executor. Your job is to pick up where the last session left off and execute the next task.
+
+## Instructions
+
+1. Read `PROGRESS.json` in the project root.
+2. If all tasks are complete, report "Plan complete — no remaining tasks" and stop.
+3. If `current_task` is `in_progress`, the previous session died mid-task. Read its notes, assess the state, and either complete or restart the task.
+4. Otherwise, identify the next pending task from the Task Dependency Graph in `{NAME}_PLAN.md`. Verify all its dependencies are marked complete in PROGRESS.json.
+5. Read the plan's Worker Instructions section — follow them exactly, including the Quality Ritual.
+6. Execute the task. Follow TDD steps. Run the build gate. Self-verify. Commit.
+7. Update PROGRESS.json.
+8. If this was a QA gate task and it passed, check if the next phase has tasks ready. If yes AND you have remaining context budget, execute the next task. If not, stop cleanly.
+9. If you hit a provider error, rate limit, or context limit: commit work, update PROGRESS.json with notes, and stop. The next scheduled run will pick up.
+
+## Circuit breaker
+
+If the same task fails 2 times in a row (check `PROGRESS.json` notes for prior failure counts):
+- Add a note: `"circuit_breaker": "task {ID} failed 2x — needs human review"`
+- Do NOT retry. Stop and wait for human intervention.
+
+## Session budget
+
+Target: complete 1-3 tasks per session. Do not attempt marathon runs.
+After each task, check: do you have enough context remaining for another full Quality Ritual cycle? If uncertain, stop.
+```
+
+This file is designed to be copy-pasted into a cron schedule, a Hermes recurring task, or an OpenClaw job. The user can set it to run every 30-60 minutes during active development for hands-free execution.
+
+### 11. Hand off to the user
+
+Show the user:
+
+- The plan file path (via a `computer://` link if in Cowork).
+- The cron prompt file path.
 - A one-paragraph summary: number of phases, number of tasks, tier mix, execution model.
 - The agentic architecture configuration: which agents, sequential vs parallel, estimated session count.
 - The first recommended task, with a prompt: *"Run `plan-runner` with 'run next task' to start execution."*
+- A note: *"To auto-schedule execution, feed `{NAME}_CRON_PROMPT.md` to a recurring agent (e.g., Hermes cron every 30min). It reads PROGRESS.json and picks up where the last session left off."*
 
 ## Edge Cases
 

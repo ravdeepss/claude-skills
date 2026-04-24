@@ -35,6 +35,36 @@ This section tells `plan-runner` how to dispatch tasks.
 
 ---
 
+## Session Resume — PROGRESS.json
+
+> This file lives at the project root. Every worker reads it before starting and
+> writes it after every task. If a session dies, the next session resumes from here.
+> Phase 0 includes a task to create this file. Schema:
+
+```json
+{
+  "plan": "{NAME}_PLAN.md",
+  "started_at": "",
+  "execution_model": "{single-agent-sequential | orchestrator-with-N-subagents}",
+  "phases": {
+    "0": {
+      "status": "pending",
+      "tasks": { "0.1": "pending", "0.2": "pending" }
+    }
+  },
+  "current_phase": null,
+  "current_task": null,
+  "last_agent": null,
+  "last_updated": "",
+  "notes": "",
+  "learnings": []
+}
+```
+
+Workers append to `"learnings"` when they discover gotchas, workarounds, or non-obvious behavior (Quality Ritual Step 6). This list survives session death and helps the next session avoid repeating mistakes.
+
+---
+
 ## Architecture Decisions
 
 Non-negotiable choices every worker must respect. Keep it short and absolute — if a decision is still open, resolve it first.
@@ -54,43 +84,80 @@ Non-negotiable choices every worker must respect. Keep it short and absolute —
 
 Every worker agent receives this section as part of its preamble. These are imperatives — follow them exactly.
 
+### Before starting any task
+
 1. Read this plan file first — Architecture Decisions, Agentic Architecture Configuration, and your assigned task block.
 2. Read each file listed in the "Context Files" section below before writing code.
-3. Stay within the scope of your task's Spec and Acceptance Criteria. Do not refactor adjacent code or "improve" unrelated areas.
-4. **TDD is mandatory for every code task:**
-   a. Write the test first.
-   b. Run the test — confirm it FAILS (proves the test is actually testing something).
-   c. Implement the feature/fix.
-   d. Run the test — confirm it PASSES.
-   e. Run the full pre-push verification pipeline.
-5. **Pre-push verification pipeline** — run ALL of these after every code change:
-   - Typecheck: `{typecheck command, e.g., pnpm tsc -b}`
-   - Lint: `{lint command, e.g., pnpm lint}`
-   - Tests: `{test command, e.g., pnpm test}`
-   - Build: `{build command, e.g., pnpm build}`
-   - ALL FOUR must pass before committing. A broken build is never acceptable.
-6. **Commit format** — use conventional commits:
-   - `feat({scope}): {description}` — new feature
-   - `fix({scope}): {description}` — bug fix
-   - `test({scope}): {description}` — tests only
-   - `docs({scope}): {description}` — documentation
-   - `refactor({scope}): {description}` — restructuring
-   - `chore({scope}): {description}` — maintenance
-7. **Do NOT:**
-   - Use `any` types in TypeScript.
-   - Leave TODO/FIXME comments — either implement it or note it as out of scope.
-   - Skip error handling — every async call needs a catch/error boundary.
-   - Use `waitForTimeout` / `cy.wait(ms)` / blanket sleeps in tests.
-   - Modify files in the do-not-touch list.
-   - Push code that doesn't build.
-8. **Self-verification:** After implementing a feature, manually verify it works by running the app and testing the feature as a user would. Document what you see in your completion report.
-9. **Progress tracking:** After completing each task, update `PROGRESS.json`:
-   ```json
-   { "current_task": "{completed task ID}", "status": "completed", "last_updated": "{ISO timestamp}" }
-   ```
-10. **Session management:** If you're running low on context or approaching a timeout, commit your work, update PROGRESS.json with your current state and any notes for the next session, and stop cleanly. Do NOT try to squeeze in one more task.
-11. Units / formats / conventions: {e.g., "2-space indent, dates in ISO 8601, all weights in kg"}.
-12. Reporting format: list files touched, commands run, test results, and a criterion-by-criterion pass/fail table.
+3. Read `PROGRESS.json` at the project root to confirm your task is next and no prior task is incomplete.
+4. Stay within the scope of your task's Spec and Acceptance Criteria. Do not refactor adjacent code or "improve" unrelated areas.
+
+### Quality Ritual — execute this for EVERY code task
+
+This is the heartbeat of the plan. Every task that produces code follows this ritual, no exceptions.
+
+**Step 1 — Red (write the test, watch it fail):**
+  - Write the test specified in the task's TDD Steps.
+  - Run it: `{single-test command}`.
+  - Confirm it FAILS. If it passes, the feature may already exist — investigate before proceeding.
+
+**Step 2 — Green (implement, watch the test pass):**
+  - Implement the feature/fix as specified.
+  - Run the test again: `{single-test command}`.
+  - Confirm it PASSES (exit 0).
+
+**Step 3 — Build gate (prove nothing is broken):**
+  - Run the full verification pipeline:
+    ```
+    {typecheck command} && {lint command} && {test command} && {build command}
+    ```
+  - ALL FOUR must pass. If any fail, fix before proceeding. A broken build is never acceptable.
+
+**Step 4 — Self-verify (be your own QA):**
+  - Launch the app and manually test the feature you just built, as a real user would.
+  - Document what you see: "I navigated to X, clicked Y, saw Z." If something looks wrong, fix it now.
+
+**Step 5 — Commit (with conventional format):**
+  - `feat({scope}): {description}` — new feature
+  - `fix({scope}): {description}` — bug fix
+  - `test({scope}): {description}` — tests only
+  - `docs({scope}): {description}` — documentation
+  - `refactor({scope}): {description}` — restructuring
+  - `chore({scope}): {description}` — maintenance
+
+**Step 6 — Save learnings (capture knowledge immediately):**
+  - Did you hit a gotcha, workaround, or non-obvious behavior? Write it down NOW.
+  - Save as a comment in the code, a note in PROGRESS.json `"notes"` field, or a memory entry.
+  - Do NOT defer this to "later" — learnings not saved immediately are lost when the session dies.
+
+**Step 7 — Update progress:**
+  - Update `PROGRESS.json` with the completed task status and timestamp.
+  - If this is the last task in a phase, set the phase status to `"completed"`.
+
+### Prohibitions
+
+Do NOT:
+- Use `any` types in TypeScript.
+- Leave TODO/FIXME comments — either implement it or note it as out of scope.
+- Skip error handling — every async call needs a catch/error boundary.
+- Use `waitForTimeout` / `cy.wait(ms)` / blanket sleeps in tests.
+- Modify files in the do-not-touch list.
+- Push code that doesn't build.
+- Mark a task complete if ANY step of the Quality Ritual failed.
+
+### Session management
+
+If you're running low on context or approaching a timeout:
+1. Finish the current Quality Ritual step if possible (don't leave a half-committed state).
+2. Commit your work.
+3. Update PROGRESS.json with your current state, what's left, and any notes for the next session.
+4. Stop cleanly. Do NOT try to squeeze in one more task.
+
+The next session reads PROGRESS.json and picks up exactly where you left off.
+
+### Conventions
+
+- Units / formats: {e.g., "2-space indent, dates in ISO 8601, all weights in kg"}.
+- Reporting format: list files touched, commands run, test results, and a criterion-by-criterion pass/fail table.
 
 ---
 
@@ -164,21 +231,27 @@ Keep this list tight — anything listed becomes required reading for every work
 
 ### Task 1.1 — {name}
 
-{same TDD task structure}
+{same TDD task structure — every code task follows the Quality Ritual above}
 
 ---
 
-### Task 1.V — Phase 1 verification gate
+### Task 1.V — Phase 1 QA gate  *(implicit — every phase ends with this)*
 
-**Goal:** Verify all Phase 1 features work correctly end-to-end.
+> **Every phase gets a QA gate automatically.** The planner does not need to justify
+> including it. It blocks the next phase. It is never skippable.
+
+**Goal:** Prove all Phase 1 features work end-to-end before anyone touches Phase 2.
 
 **Steps:**
-1. Run the full test suite: `{suite command}`
-2. Verify all tests pass (exit 0)
-3. Run typecheck: `{typecheck command}` — must pass
-4. Run build: `{build command}` — must pass
-5. Manual smoke test: launch the app, navigate through each Phase 1 feature, confirm they work. Document observations.
-6. If anything fails: fix it now, re-run full verification, only mark complete when everything is green.
+1. Run the full test suite: `{suite command}` — every test must pass.
+2. Run typecheck: `{typecheck command}` — must exit 0.
+3. Run build: `{build command}` — must exit 0.
+4. Manual smoke test: launch the app, walk through every feature delivered in this phase as a real user. Document exactly what you see (screenshots / copy-pasted output / "I clicked X and saw Y").
+5. If ANYTHING fails:
+   - Fix it NOW. Do not log it for later. Do not move on.
+   - After each fix, re-run steps 1-4 from scratch.
+   - Only mark this gate complete when everything is green AND the smoke test is documented.
+6. Update PROGRESS.json: set phase status to `"completed"`, note any learnings.
 
 **Tier:** capable
 
@@ -186,11 +259,12 @@ Keep this list tight — anything listed becomes required reading for every work
 1. `{suite command}` exits 0 with all tests passing
 2. `{typecheck command}` exits 0
 3. `{build command}` exits 0
-4. Agent has documented manual smoke test results
+4. Smoke test documented with specific observations (not "looks fine")
+5. PROGRESS.json updated with phase completion
 
 ---
 
-## Phase 2 — {Name}  (requires Phase 1 verification gate)
+## Phase 2 — {Name}  (requires Phase 1 QA gate)
 
 ### Task 2.1 — {name}
 
@@ -198,9 +272,9 @@ Keep this list tight — anything listed becomes required reading for every work
 
 ---
 
-### Task 2.V — Phase 2 verification gate
+### Task 2.V — Phase 2 QA gate
 
-{same verification gate structure}
+{same QA gate structure as Phase 1.V — every phase gets one}
 
 ---
 
@@ -251,29 +325,4 @@ Phase N (Optional / Future — not scheduled):
 
 ---
 
-## PROGRESS.json
-
-> Create this file at the project root during Phase 0. `plan-runner` and workers
-> read/write it for session resume. Initialize with:
-
-```json
-{
-  "plan": "{NAME}_PLAN.md",
-  "started_at": "",
-  "execution_model": "{single-agent-sequential | orchestrator-with-N-subagents}",
-  "phases": {
-    "0": {
-      "status": "pending",
-      "tasks": {
-        "0.1": "pending",
-        "0.2": "pending"
-      }
-    }
-  },
-  "current_phase": null,
-  "current_task": null,
-  "last_agent": null,
-  "last_updated": "",
-  "notes": ""
-}
-```
+> **Note:** PROGRESS.json schema is defined in the "Session Resume" section near the top of this plan.
