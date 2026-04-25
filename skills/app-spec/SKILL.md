@@ -1,6 +1,6 @@
 ---
 name: app-spec
-description: Generate a new `app-spec.json` from scratch, or update an existing one, for any software project. Use when the user says "create an app-spec", "generate app-spec.json", "document this codebase as a spec", "write a machine-readable spec for this app", "refresh the app-spec", "update the spec — the code changed", "make an app-spec for ike-tasks / ike-saas / {project}", or passes a repo path and asks for a structured feature/architecture snapshot. Produces a single JSON file at the project root that downstream skills (notably `create-test-plan` and `test-runner`) consume as the feature catalogue and architecture-of-record. Works for any stack — OSS client-server, SaaS multi-tenant, CLI, library — by adapting which sections are populated.
+description: Generate a new `app-spec.json` from scratch, or update an existing one, for any software project. Use when the user says "create an app-spec", "generate app-spec.json", "document this codebase as a spec", "write a machine-readable spec for this app", "refresh the app-spec", "update the spec — the code changed", "make an app-spec for ike-tasks / ike-saas / {project}", or passes a repo path and asks for a structured feature/architecture snapshot. Produces a single JSON file at the project root that downstream skills (notably `create-plan` and `plan-runner`) consume as the feature catalogue and architecture-of-record. Works for any stack — OSS client-server, SaaS multi-tenant, CLI, library — by adapting which sections are populated.
 ---
 
 # App Spec
@@ -9,8 +9,8 @@ You are a staff-engineer-level codebase analyst. Your job: **produce or refresh 
 
 Downstream skills depend on this file:
 
-- `create-test-plan` reads the `features` array to build its coverage matrix.
-- `test-runner` reads the `testEnvironment` block to know the mock strategy.
+- `create-plan` reads the `features` array to build its coverage matrix.
+- `plan-runner` (test mode) reads the `testEnvironment` block to know the mock strategy.
 - Future code-gen / migration / review skills can use it as grounded context.
 
 Every ambiguity you leave in the spec becomes a wrong assumption made by a downstream worker. Write for a worker agent that cannot re-read the repo.
@@ -261,9 +261,8 @@ Same as GENERATE step 6, but the summary is a **diff**: *"Added 3 features, upda
 ## Relationship to other skills
 
 - `app-spec` (this skill) → ground-truth document.
-- `create-test-plan` reads `features[]` and `testEnvironment` to draft a regression plan.
-- `test-runner` reads `testEnvironment` when classifying failures into the 5 buckets.
+- `create-plan` reads `features[]`, `testEnvironment`, and `outOfScopeForRegressionV1` to draft plans and structure phases.
+- `plan-runner` (test mode) reads `testEnvironment` when classifying failures into the 5 buckets.
 - `engineering:system-design` / `engineering:architecture` can _consume_ this file when writing ADRs, but don't use those skills to produce the spec itself — they don't enforce the schema shape.
-- `create-plan` (generic) for a build project reads the spec's `features[]` and `outOfScopeForRegressionV1` to structure phases.
 
 Keep the spec small, accurate, and current. It's the one file every other skill in the stack trusts.

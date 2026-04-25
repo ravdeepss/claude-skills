@@ -388,8 +388,7 @@ Scope should match the feature or module name. Message must be a single line, im
 
 ## Relationship to other skills
 
-- **`plan-runner`** — executes tasks from the plan this skill produces. The two are coupled only through the plan-file format defined in `PLAN_TEMPLATE.md`.
-- **`test-runner`** — drives the red→green loop for test-focused tasks. Can be invoked by `plan-runner` for TDD verification steps.
+- **`plan-runner`** — executes tasks from the plan this skill produces. Handles three modes: run mode (dispatches development tasks to worker agents), test mode (drives the red→green loop for test-focused tasks and verification gates), and prep mode (exports prompts for external models). Also enforces rollback safety for deploy tasks. The two skills are coupled only through the plan-file format defined in `PLAN_TEMPLATE.md`.
 - **`app-spec`** — produces `app-spec.json`, which this skill consumes for coverage matrices when planning tests.
 - **`engineering:architecture`** / **`engineering:system-design`** — use these BEFORE this skill if the architecture isn't decided.
 - **`engineering:testing-strategy`** — consult for upstream "unit vs E2E vs contract" decisions before planning.
