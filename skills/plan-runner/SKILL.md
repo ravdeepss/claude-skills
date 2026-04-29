@@ -91,17 +91,21 @@ Compose the prompt from three blocks:
 ```
 You are a worker agent executing ONE task from a larger plan. You MUST:
 
-1. Read the plan file `<PLAN_FILE>` first — specifically the Architecture
+1. Read `app-spec.json` (or `APP_SPEC_SUMMARY.md` for quick orientation)
+   at the project root FIRST — it contains the full codebase architecture,
+   file paths, schema, conventions, and feature details. This eliminates
+   the need to explore the repo structure.
+2. Read the plan file `<PLAN_FILE>` — specifically the Architecture
    Decisions section and this task's block — so you understand the contract.
-2. Read every file listed in the plan's "Context Files" section before
+3. Read every file listed in the plan's "Context Files" section before
    writing code or prose.
-3. Stay inside the scope defined by this task's Spec and Acceptance criteria.
+4. Stay inside the scope defined by this task's Spec and Acceptance criteria.
    Do NOT refactor adjacent code, rename things, or "improve" unrelated areas.
-4. Do NOT break the invariants or parsing/data contracts the Architecture
+5. Do NOT break the invariants or parsing/data contracts the Architecture
    Decisions call out.
-5. If a build or test command is specified in Worker Instructions, run it
+6. If a build or test command is specified in Worker Instructions, run it
    after your changes and report pass/fail.
-6. When done, explicitly list every acceptance criterion from the task and
+7. When done, explicitly list every acceptance criterion from the task and
    mark each pass / fail with a one-line justification.
 ```
 
@@ -349,6 +353,22 @@ After a run-mode agent returns, after the user confirms a prep-mode external run
 4. If this was a **deploy task** and acceptance criteria failed post-deploy, trigger the **Rollback Strategy** below before offering retry.
 5. Announce the next available task (do not auto-run unless the user asked for a streak).
 
+## 8. Post-plan app-spec refresh
+
+When **all tasks in all phases** are marked ✅ (the plan is complete):
+
+1. **Check if `app-spec.json` exists** at the project root.
+2. **If it exists:** invoke the `app-spec` skill in **Mode C (POST-PLAN REFRESH)**. Pass context:
+   - The plan filename that just completed
+   - A summary of what changed (new features added, schema migrations run, new routes/components, etc.) — derived from the completed tasks' descriptions and acceptance criteria
+   - The list of files created/modified during plan execution (from PROGRESS.json or the task reports)
+3. **If it does NOT exist:** invoke the `app-spec` skill in **GENERATE mode**. A completed plan means there's now real code to document — this is a good time to create the spec.
+4. **Report to the user:** *"Plan complete. App-spec has been refreshed to reflect all changes made during plan execution. {N} features updated, {M} new entries added."*
+
+This ensures the spec stays current as the codebase evolves through plan execution. The next plan or agent session will have an accurate picture of the codebase without re-scanning.
+
+**Do NOT skip this step.** Stale app-specs cause downstream agents to make wrong assumptions. The refresh is cheap (Mode C only scans changed files) compared to the cost of agents working with outdated context.
+
 ---
 
 ## Rollback Strategy
@@ -490,18 +510,23 @@ DEPLOYMENT SAFETY RULES:
 
 ---
 
-## Relationship to `create-plan`
+## Relationship to `create-plan` and `app-spec`
 
 If the user starts a session by saying "I want to build X" and there is no plan file yet, recommend the `create-plan` skill first. `create-plan` is the upstream authoring skill (Opus-class). This skill — `plan-runner` — is the downstream execution dispatcher that handles:
 
 - **Development tasks** via run/prep mode (scaffolding, new spec files, feature implementation, mock-layer extensions).
 - **Test execution** via test mode (running existing specs, fixing bugs those tests expose, verification gates).
 - **Deploy safety** via the rollback strategy (reverting broken deploys, maintaining known-good state).
+- **Spec maintenance** — after plan completion, refreshing `app-spec.json` so the next plan/agent session has current context.
 
 Typical sequence for a new project:
-1. `create-plan` writes the plan.
-2. `plan-runner` (run mode) completes the foundation phase (scaffolding, mocks, page-object base).
-3. `plan-runner` (run mode) writes specs for each feature phase.
-4. `plan-runner` (test mode) runs the verification gate at the end of each phase.
-5. If test mode escalates, the user decides whether to re-dispatch via run mode with added context or intervene manually.
-6. For deploy tasks, `plan-runner` appends deploy safety rules and monitors for rollback triggers.
+1. `app-spec` generates `app-spec.json`, `APP_SPEC_SUMMARY.md`, and `DEPENDENCY_GRAPH.md`.
+2. `create-plan` reads the app-spec and writes the plan.
+3. `plan-runner` (run mode) completes the foundation phase (scaffolding, mocks, page-object base).
+4. `plan-runner` (run mode) writes specs for each feature phase.
+5. `plan-runner` (test mode) runs the verification gate at the end of each phase.
+6. If test mode escalates, the user decides whether to re-dispatch via run mode with added context or intervene manually.
+7. For deploy tasks, `plan-runner` appends deploy safety rules and monitors for rollback triggers.
+8. **After all tasks complete**, `plan-runner` invokes `app-spec` in POST-PLAN REFRESH mode to update the spec with all changes made during execution.
+
+This creates a virtuous cycle: `app-spec` → `create-plan` → `plan-runner` → `app-spec` (refresh) → next `create-plan` session has fresh context.

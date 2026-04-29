@@ -165,11 +165,12 @@ The next session reads PROGRESS.json and picks up exactly where you left off.
 
 Paths (project-root-relative) that every worker should read before starting. If a file doesn't exist yet, add a Phase 0 task to create it and note `(created by Task 0.X)` next to it.
 
-- `CONVENTIONS.md` — coding and naming conventions *(created by Task 0.X)*
+- `app-spec.json` — full codebase spec: architecture, schema, features, conventions, scripts (read this FIRST — it eliminates the need to explore the repo)
+- `APP_SPEC_SUMMARY.md` — prose digest of the codebase for quick orientation
 - `{path}` — {description}
 - `{path}` — {description}
 
-Keep this list tight — anything listed becomes required reading for every worker, which costs tokens.
+Keep this list tight — anything listed becomes required reading for every worker, which costs tokens. Note: `app-spec.json` is large but pays for itself by eliminating codebase exploration.
 
 ---
 

@@ -30,9 +30,28 @@ This skill was forged from real-world lessons. A project (ike-saas) ran 97 commi
 
 ## Workflow
 
+### 0. Load app-spec (before anything else)
+
+**Before intake, before planning, before writing a single task** — check whether the project has an `app-spec.json` at its root.
+
+**If `app-spec.json` exists:**
+- Read it in full. This is your primary context source for the project.
+- Extract and use: `features[]` (for coverage planning), `architecture` (for directory layout and deployment), `technology` (for build/test/lint commands), `scripts` (for exact command strings to put in tasks), `database` (for schema awareness in migration tasks), `conventions` (for worker instructions), `testEnvironment` (for test strategy), `environmentVariables` (for setup tasks).
+- Also read `APP_SPEC_SUMMARY.md` if it exists — it contains conventions and "things to know" that should inform Worker Instructions.
+- Also read `DEPENDENCY_GRAPH.md` if it exists — it helps you order tasks correctly (don't schedule feature B before feature A if B depends on A).
+- You can **skip most of intake Group B** (tech stack, constraints, conventions) since app-spec already has this. Only ask for gaps.
+- Reference `app-spec.json` in the plan's **Context Files** section so every worker reads it too.
+
+**If `app-spec.json` does NOT exist:**
+- Tell the user: *"No app-spec.json found. I'll generate one first — it gives me (and every worker agent) a complete picture of the codebase without re-scanning files on every task."*
+- Invoke the `app-spec` skill in GENERATE mode. Wait for it to complete.
+- Then proceed with planning using the newly created spec.
+
+**Why this matters:** Without an app-spec, every worker agent in the plan will waste tokens exploring the codebase structure, guessing at conventions, and potentially making wrong assumptions about file paths, function names, or schema shapes. The app-spec pays for itself on the very first task.
+
 ### 1. Intake — ask the user enough to plan well
 
-Before writing anything, ask the user the question groups below using `AskUserQuestion`. If the user already provided some answers in their initial message, skip those and only ask the gaps. Don't ask more than ~4 questions at a time — batch, wait, then follow up.
+Before writing anything, ask the user the question groups below using `AskUserQuestion`. If the user already provided some answers in their initial message, skip those and only ask the gaps. If app-spec.json was loaded in step 0, skip questions already answered by it. Don't ask more than ~4 questions at a time — batch, wait, then follow up.
 
 **Group A — Goal & Success Criteria**
 
@@ -62,10 +81,11 @@ Ask ALL of these. Don't assume.
 
 **Group D — Context Files & Testing**
 
-- Schemas, data formats, style guides, architectural docs, existing modules workers will extend.
+- If `app-spec.json` exists, it should be the first context file listed. It contains schemas, architecture, conventions, and feature details that every worker needs. Don't duplicate this information in the plan — reference the spec.
+- Additional context: style guides, architectural docs, existing modules workers will extend.
 - When a worker picks up one task, which files must they read first? List absolute or project-root-relative paths.
 - If a context file doesn't exist yet, it becomes a Phase 0 task.
-- What test runner is in use or should be adopted? (Playwright, Vitest, Jest, Cypress, etc.)
+- What test runner is in use or should be adopted? (Playwright, Vitest, Jest, Cypress, etc.) — check `app-spec.json`'s `testEnvironment` and `scripts` sections first.
 - Is there an existing test suite? If so, where and what state is it in?
 
 **Group E — Phasing Preferences**
@@ -388,7 +408,7 @@ Scope should match the feature or module name. Message must be a single line, im
 
 ## Relationship to other skills
 
-- **`plan-runner`** — executes tasks from the plan this skill produces. Handles three modes: run mode (dispatches development tasks to worker agents), test mode (drives the red→green loop for test-focused tasks and verification gates), and prep mode (exports prompts for external models). Also enforces rollback safety for deploy tasks. The two skills are coupled only through the plan-file format defined in `PLAN_TEMPLATE.md`.
-- **`app-spec`** — produces `app-spec.json`, which this skill consumes for coverage matrices when planning tests.
+- **`app-spec`** — produces `app-spec.json`, `APP_SPEC_SUMMARY.md`, and `DEPENDENCY_GRAPH.md`. **This skill requires app-spec as a prerequisite.** If no app-spec exists, invoke the `app-spec` skill in GENERATE mode before planning. The spec provides: feature catalogue (for coverage matrices), architecture and conventions (for Worker Instructions), scripts (for exact build/test/lint commands), schema (for migration-aware task ordering), and dependency graph (for task sequencing). Always list `app-spec.json` as the first entry in the plan's Context Files section.
+- **`plan-runner`** — executes tasks from the plan this skill produces. Handles three modes: run mode (dispatches development tasks to worker agents), test mode (drives the red→green loop for test-focused tasks and verification gates), and prep mode (exports prompts for external models). Also enforces rollback safety for deploy tasks. After a plan completes, `plan-runner` invokes `app-spec` in UPDATE mode to keep the spec current with code changes. The two skills are coupled only through the plan-file format defined in `PLAN_TEMPLATE.md`.
 - **`engineering:architecture`** / **`engineering:system-design`** — use these BEFORE this skill if the architecture isn't decided.
 - **`engineering:testing-strategy`** — consult for upstream "unit vs E2E vs contract" decisions before planning.
