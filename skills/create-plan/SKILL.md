@@ -5,7 +5,39 @@ description: Author a detailed `NAME_PLAN.md` for any software project — devel
 
 # Create Plan
 
-You are a principal-engineer-level planner. Your job: interview the user about a project they want built (or significantly changed), then emit a structured `{NAME}_PLAN.md` at the project root that the companion `plan-runner` skill can execute task-by-task.
+You are a principal-engineer-level planner. Your job: interview the user about a project they want built (or significantly changed), then emit a structured `{NAME}_PLAN.md` in the project's `plans/` folder that the companion `plan-runner` skill can execute task-by-task.
+
+## Plan location and registry
+
+**All plans live in `<project-root>/plans/`.** Create this directory if it doesn't exist. This keeps the project root clean and supports multiple plans per project.
+
+**`plans/PLANS_REGISTRY.json`** tracks the status of all plans. This is the single source of truth that `plan-runner` checks before picking up a plan — a completed plan is never re-executed. Schema:
+
+```json
+{
+  "plans": [
+    {
+      "file": "DASHBOARD_PLAN.md",
+      "name": "Dashboard",
+      "status": "completed | in_progress | pending | abandoned",
+      "created_at": "2026-05-03T10:00:00Z",
+      "completed_at": "2026-05-05T14:30:00Z",
+      "total_tasks": 24,
+      "completed_tasks": 24,
+      "current_phase": 3,
+      "last_agent": "GLM-5.1",
+      "last_updated": "2026-05-05T14:30:00Z"
+    }
+  ]
+}
+```
+
+When creating a new plan:
+1. Create the plan file in `plans/`
+2. Create or update `plans/PLANS_REGISTRY.json` — add an entry with status `"pending"`
+3. Create `plans/{NAME}_PROGRESS.json` for per-task tracking (the existing PROGRESS.json schema, but named per-plan to support multiple concurrent plans)
+
+When a plan completes (all tasks ✅), `plan-runner` sets its registry status to `"completed"` with a `completed_at` timestamp. This prevents accidental re-execution.
 
 ## Why this skill exists
 
@@ -32,18 +64,18 @@ This skill was forged from real-world lessons. A project (ike-saas) ran 97 commi
 
 ### 0. Load app-spec (before anything else)
 
-**Before intake, before planning, before writing a single task** — check whether the project has an `app-spec.json` at its root.
+**Before intake, before planning, before writing a single task** — check whether the project has an `.app-spec/app-spec.json`.
 
-**If `app-spec.json` exists:**
+**If `.app-spec/app-spec.json` exists:**
 - Read it in full. This is your primary context source for the project.
 - Extract and use: `features[]` (for coverage planning), `architecture` (for directory layout and deployment), `technology` (for build/test/lint commands), `scripts` (for exact command strings to put in tasks), `database` (for schema awareness in migration tasks), `conventions` (for worker instructions), `testEnvironment` (for test strategy), `environmentVariables` (for setup tasks).
-- Also read `APP_SPEC_SUMMARY.md` if it exists — it contains conventions and "things to know" that should inform Worker Instructions.
-- Also read `DEPENDENCY_GRAPH.md` if it exists — it helps you order tasks correctly (don't schedule feature B before feature A if B depends on A).
+- Also read `.app-spec/APP_SPEC_SUMMARY.md` if it exists — it contains conventions and "things to know" that should inform Worker Instructions.
+- Also read `.app-spec/DEPENDENCY_GRAPH.md` if it exists — it helps you order tasks correctly (don't schedule feature B before feature A if B depends on A).
 - You can **skip most of intake Group B** (tech stack, constraints, conventions) since app-spec already has this. Only ask for gaps.
-- Reference `app-spec.json` in the plan's **Context Files** section so every worker reads it too.
+- Reference `.app-spec/app-spec.json` in the plan's **Context Files** section so every worker reads it too.
 
-**If `app-spec.json` does NOT exist:**
-- Tell the user: *"No app-spec.json found. I'll generate one first — it gives me (and every worker agent) a complete picture of the codebase without re-scanning files on every task."*
+**If `.app-spec/app-spec.json` does NOT exist:**
+- Tell the user: *"No app-spec found. I'll generate one first — it gives me (and every worker agent) a complete picture of the codebase without re-scanning files on every task."*
 - Invoke the `app-spec` skill in GENERATE mode. Wait for it to complete.
 - Then proceed with planning using the newly created spec.
 
@@ -51,7 +83,7 @@ This skill was forged from real-world lessons. A project (ike-saas) ran 97 commi
 
 ### 1. Intake — ask the user enough to plan well
 
-Before writing anything, ask the user the question groups below using `AskUserQuestion`. If the user already provided some answers in their initial message, skip those and only ask the gaps. If app-spec.json was loaded in step 0, skip questions already answered by it. Don't ask more than ~4 questions at a time — batch, wait, then follow up.
+Before writing anything, ask the user the question groups below using `AskUserQuestion`. If the user already provided some answers in their initial message, skip those and only ask the gaps. If `.app-spec/app-spec.json` was loaded in step 0, skip questions already answered by it. Don't ask more than ~4 questions at a time — batch, wait, then follow up.
 
 **Group A — Goal & Success Criteria**
 
@@ -81,11 +113,11 @@ Ask ALL of these. Don't assume.
 
 **Group D — Context Files & Testing**
 
-- If `app-spec.json` exists, it should be the first context file listed. It contains schemas, architecture, conventions, and feature details that every worker needs. Don't duplicate this information in the plan — reference the spec.
+- If `.app-spec/app-spec.json` exists, it should be the first context file listed. It contains schemas, architecture, conventions, and feature details that every worker needs. Don't duplicate this information in the plan — reference the spec.
 - Additional context: style guides, architectural docs, existing modules workers will extend.
 - When a worker picks up one task, which files must they read first? List absolute or project-root-relative paths.
 - If a context file doesn't exist yet, it becomes a Phase 0 task.
-- What test runner is in use or should be adopted? (Playwright, Vitest, Jest, Cypress, etc.) — check `app-spec.json`'s `testEnvironment` and `scripts` sections first.
+- What test runner is in use or should be adopted? (Playwright, Vitest, Jest, Cypress, etc.) — check `.app-spec/app-spec.json`'s `testEnvironment` and `scripts` sections first.
 - Is there an existing test suite? If so, where and what state is it in?
 
 **Group E — Phasing Preferences**
@@ -102,8 +134,8 @@ Based on intake Group C, apply these rules:
 - NEVER mark tasks as parallelizable. Every task is strictly sequential.
 - Keep individual tasks small (complete within ~15-20 min to avoid context overflow).
 - Include explicit "checkpoint" instructions: save progress, commit work, clear context if needed.
-- Add PROGRESS.json update step to each task so the agent can resume if the session dies.
-- Include "if you're running low on context, commit your work, update PROGRESS.json, and stop — the next session will pick up from here" in Worker Instructions.
+- Add `plans/{NAME}_PROGRESS.json` update step to each task so the agent can resume if the session dies.
+- Include "if you're running low on context, commit your work, update progress files, and stop — the next session will pick up from here" in Worker Instructions.
 
 **Orchestrator + subagents:**
 - Parallelize only up to the number of available subagents.
@@ -128,7 +160,63 @@ Based on intake Group C, apply these rules:
 
 Use `PLAN_TEMPLATE.md` (in this skill's folder) as the skeleton. Fill in every section. The template defines the exact format `plan-runner` knows how to parse — don't improvise new section names.
 
-The top-level filename is `{NAME}_PLAN.md` where `{NAME}` reflects the project or initiative (e.g., `DASHBOARD_PLAN.md`, `MIGRATION_PLAN.md`). Ask the user for the name if it's not obvious.
+The top-level filename is `{NAME}_PLAN.md` saved to `plans/` (e.g., `plans/DASHBOARD_PLAN.md`, `plans/MIGRATION_PLAN.md`). Ask the user for the name if it's not obvious.
+
+### 3.5. Write Phase GATE — Human Input Collection (always first)
+
+**This phase comes before Phase 0.** Its purpose: collect everything agents cannot obtain on their own — credentials, tokens, config values, platform access, optional design assets. By front-loading human dependencies, plan progress is never stalled waiting on a person mid-execution.
+
+Phase GATE has a single task:
+
+```
+## Phase GATE — Human Input Collection  (must complete before Phase 0)
+
+### Task GATE.1 — Collect required human inputs
+
+**Goal:** Present the human operator with a checklist of inputs needed for this plan to execute unblocked. Collect all items before any agent work begins.
+
+**Checklist:**
+
+Required items (plan CANNOT proceed without these):
+- [ ] {item — e.g., "AWS credentials (access key + secret) for deployment tasks"}
+- [ ] {item — e.g., "GitHub PAT with repo + workflow scopes for CI setup"}
+- [ ] {item — e.g., "Cloudflare API token for DNS tasks"}
+- [ ] {item — e.g., "Cognito User Pool ID and App Client ID"}
+- [ ] {item — e.g., "Production database connection string"}
+- [ ] {item — e.g., "DNS domain name and registrar access"}
+- [ ] {item — e.g., "Platform secrets (Stripe key, SendGrid key, etc.)"}
+
+Optional items (plan can proceed without, but some tasks may be limited):
+- [ ] {item — e.g., "Brand assets (logo SVG, color palette) for UI polish tasks"}
+- [ ] {item — e.g., "MCP server access for integration features"}
+- [ ] {item — e.g., "Seed data or sample content for demo/test fixtures"}
+
+**Instructions for the human:**
+1. Check off each item as you provide it.
+2. For credentials: store them in `.env.local` (gitignored) or your secrets manager.
+3. For optional items: mark as "skipped" if not available — affected tasks will be flagged.
+4. Once all required items are checked, mark this task complete.
+
+**Acceptance criteria:**
+1. All required items are provided and accessible to agents (in .env, secrets manager, or documented location)
+2. Optional items are either provided or explicitly marked "skipped" with a note
+3. This task is marked complete in PLANS_REGISTRY.json / PROGRESS.json
+```
+
+**How to populate the checklist:** During intake, identify everything that requires human action — API keys, tokens, credentials, DNS access, platform configurations, design assets, third-party service setups. Categorize each as Required vs Optional based on whether the plan can proceed without it. Be specific about what's needed (not just "AWS access" but "AWS access key + secret with S3 and CloudFront permissions for deployment tasks in Phase 2").
+
+**Common items to check for:**
+- Cloud provider credentials (AWS, GCP, Azure)
+- Git platform tokens (GitHub PAT, GitLab token)
+- CDN/DNS tokens (Cloudflare, Route53)
+- Auth service config (Cognito, Auth0, Supabase Auth)
+- Environment/deployment credentials (Vercel, Fly.io, Railway)
+- Database connection strings
+- Third-party API keys (Stripe, SendGrid, Twilio, etc.)
+- MCP server access or API endpoints
+- Design assets (logos, brand colors, fonts)
+- Seed data or content fixtures
+- Platform secrets that must be manually configured
 
 ### 4. Write Phase 0 — Foundation / Bootstrap
 
@@ -138,7 +226,7 @@ For **new projects**, Phase 0 includes the full bootstrap checklist (if the user
 - **0.2 CI/CD pipeline** — GitHub Actions workflow (install → typecheck → lint → test → build), branch protection on main, Vercel preview deploys.
 - **0.3 Test runner setup** — install test framework, create config, wire lint rules banning blanket timeouts.
 - **0.4 Agent & provider configuration** — verify all agents have access, define routing rules, set token budgets.
-- **0.5 State tracking** — create PROGRESS.json at repo root, configure plan-runner to read/write it.
+- **0.5 State tracking** — create `plans/{NAME}_PROGRESS.json` and update `plans/PLANS_REGISTRY.json`, configure plan-runner to read/write them.
 - **0.6 Conventions & context files** — commit CONVENTIONS.md (commit format, branch naming, code style), any schema docs.
 - **0.7 Quality gates** — pre-push hooks (tsc → lint → test → build), feature completion checklist template.
 
@@ -146,7 +234,7 @@ For **existing projects**, Phase 0 is lighter:
 - Verify the app builds and runs.
 - Verify test runner is configured.
 - Create/update any missing context files.
-- Set up PROGRESS.json if not present.
+- Set up `plans/{NAME}_PROGRESS.json` and `plans/PLANS_REGISTRY.json` if not present.
 
 Every Phase 0 task is `capable` tier. Phase 0 gates everything.
 
@@ -303,18 +391,24 @@ Before saving the plan, walk through every item:
 7. Is the Task Dependency Graph consistent with the parallelism model (single agent = sequential, multi-agent = bounded parallel)?
 8. Are tasks sized appropriately for the target agent's capabilities? Would GLM-5.1 understand what to do without asking questions?
 9. Is the total task count under ~40? If not, split into sub-plans.
-10. Does Phase 0 include PROGRESS.json setup for session resume?
+10. Does Phase 0 include `plans/{NAME}_PROGRESS.json` setup for session resume?
 11. Is the Session Resume section populated near the top of the plan (not buried at the bottom)?
 12. Do any tasks modify DB schema? If so, do they include migration impact analysis?
 13. Are conventional commit formats specified in Worker Instructions?
 14. Are explicit "do NOT" instructions included for tasks targeting weaker agents?
 15. Have you emitted the companion `{NAME}_CRON_PROMPT.md` file for auto-scheduled execution?
 
-### 10. Save the plan and emit the cron prompt
+### 10. Save the plan and update the registry
 
-Write the plan to `{project-root}/{NAME}_PLAN.md`.
+Write the plan to `plans/{NAME}_PLAN.md`.
 
-Then emit a companion file: `{project-root}/{NAME}_CRON_PROMPT.md`. This is a self-contained prompt that can be fed to a scheduled agent (cron job, Hermes schedule, OpenClaw task) to auto-execute the plan without human nudging. Contents:
+Create or update `plans/PLANS_REGISTRY.json`:
+- If the file doesn't exist, create it with a `"plans"` array containing this plan's entry (status: `"pending"`).
+- If it exists, append this plan's entry to the `"plans"` array.
+
+Create `plans/{NAME}_PROGRESS.json` with the initial schema (all tasks pending).
+
+Then emit a companion file: `plans/{NAME}_CRON_PROMPT.md`. This is a self-contained prompt that can be fed to a scheduled agent (cron job, Hermes schedule, OpenClaw task) to auto-execute the plan without human nudging. Contents:
 
 ```markdown
 # Auto-execution prompt for {NAME}_PLAN.md
@@ -323,19 +417,20 @@ You are a plan executor. Your job is to pick up where the last session left off 
 
 ## Instructions
 
-1. Read `PROGRESS.json` in the project root.
-2. If all tasks are complete, report "Plan complete — no remaining tasks" and stop.
-3. If `current_task` is `in_progress`, the previous session died mid-task. Read its notes, assess the state, and either complete or restart the task.
-4. Otherwise, identify the next pending task from the Task Dependency Graph in `{NAME}_PLAN.md`. Verify all its dependencies are marked complete in PROGRESS.json.
-5. Read the plan's Worker Instructions section — follow them exactly, including the Quality Ritual.
-6. Execute the task. Follow TDD steps. Run the build gate. Self-verify. Commit.
-7. Update PROGRESS.json.
-8. If this was a QA gate task and it passed, check if the next phase has tasks ready. If yes AND you have remaining context budget, execute the next task. If not, stop cleanly.
-9. If you hit a provider error, rate limit, or context limit: commit work, update PROGRESS.json with notes, and stop. The next scheduled run will pick up.
+1. Read `plans/PLANS_REGISTRY.json` — if this plan's status is `"completed"`, report "Plan already complete" and stop.
+2. Read `plans/{NAME}_PROGRESS.json`.
+3. If all tasks are complete, report "Plan complete — no remaining tasks" and stop.
+4. If `current_task` is `in_progress`, the previous session died mid-task. Read its notes, assess the state, and either complete or restart the task.
+5. Otherwise, identify the next pending task from the Task Dependency Graph in `plans/{NAME}_PLAN.md`. Verify all its dependencies are marked complete in PROGRESS.json.
+6. Read the plan's Worker Instructions section — follow them exactly, including the Quality Ritual.
+7. Execute the task. Follow TDD steps. Run the build gate. Self-verify. Commit.
+8. Update `plans/{NAME}_PROGRESS.json` and `plans/PLANS_REGISTRY.json` (increment completed_tasks).
+9. If this was a QA gate task and it passed, check if the next phase has tasks ready. If yes AND you have remaining context budget, execute the next task. If not, stop cleanly.
+10. If you hit a provider error, rate limit, or context limit: commit work, update PROGRESS.json with notes, and stop. The next scheduled run will pick up.
 
 ## Circuit breaker
 
-If the same task fails 2 times in a row (check `PROGRESS.json` notes for prior failure counts):
+If the same task fails 2 times in a row (check `plans/{NAME}_PROGRESS.json` notes for prior failure counts):
 - Add a note: `"circuit_breaker": "task {ID} failed 2x — needs human review"`
 - Do NOT retry. Stop and wait for human intervention.
 
@@ -351,33 +446,38 @@ This file is designed to be copy-pasted into a cron schedule, a Hermes recurring
 
 Show the user:
 
-- The plan file path (via a `computer://` link if in Cowork).
-- The cron prompt file path.
+- The plan file path (`plans/{NAME}_PLAN.md` — via a `computer://` link if in Cowork).
+- The cron prompt file path (`plans/{NAME}_CRON_PROMPT.md`).
 - A one-paragraph summary: number of phases, number of tasks, tier mix, execution model.
 - The agentic architecture configuration: which agents, sequential vs parallel, estimated session count.
-- The first recommended task, with a prompt: *"Run `plan-runner` with 'run next task' to start execution."*
-- A note: *"To auto-schedule execution, feed `{NAME}_CRON_PROMPT.md` to a recurring agent (e.g., Hermes cron every 30min). It reads PROGRESS.json and picks up where the last session left off."*
+- Note that Phase GATE must be completed by the human first (remind them of the checklist items).
+- The first agent-executable task (after GATE), with a prompt: *"Once you've completed the GATE checklist, run `plan-runner` with 'run next task' to start execution."*
+- A note: *"To auto-schedule execution, feed `plans/{NAME}_CRON_PROMPT.md` to a recurring agent (e.g., Hermes cron every 30min). It reads PLANS_REGISTRY.json and PROGRESS.json to pick up where the last session left off."*
 
 ## Edge Cases
 
-- **User's project already has a `*_PLAN.md`:** ask whether they want to overwrite, extend (add phases/tasks), or create a new one with a different name.
+- **User's project already has plans in `plans/`:** check `plans/PLANS_REGISTRY.json`. If the existing plan is completed, create a new one. If in_progress, ask whether they want to extend it or create a separate plan. Never overwrite a completed plan.
 - **User can't specify context files:** Phase 0 Task 0.1 becomes "Write `SCHEMA.md` / `CONVENTIONS.md`" — always a `capable` doc-writing task.
 - **User hasn't decided the architecture:** stop planning. Use `engineering:architecture` or `engineering:system-design` first. A plan built on undecided architecture produces worker-agent chaos.
 - **Scope is huge (>40 tasks):** break into a top-level roadmap of sub-plans. Emit the first sub-plan fully specced (Phase 0 + Phase 1). Leave later phases as title-only stubs for follow-up `create-plan` passes. Each sub-plan is one focused session.
-- **User wants a standalone test plan (regression/E2E coverage):** treat it as a development plan where every task is "write and verify a test". Use the same TDD task structure but the "implement" step is authoring the test spec, and verification is "test passes against the existing app". Include a coverage matrix listing every feature from `app-spec.json` and the corresponding test task IDs.
+- **User wants a standalone test plan (regression/E2E coverage):** treat it as a development plan where every task is "write and verify a test". Use the same TDD task structure but the "implement" step is authoring the test spec, and verification is "test passes against the existing app". Include a coverage matrix listing every feature from `.app-spec/app-spec.json` and the corresponding test task IDs.
 - **User wants this executed IMMEDIATELY:** decline — that's not this skill. Point them at `plan-runner` or direct task execution.
 - **App is broken / won't build:** make this Phase 0 Task 0.1 with explicit acceptance criteria ("browse to the dev URL and see the authenticated landing surface"). All other phases wait on it.
-- **Plan would exceed agent's context window:** add explicit checkpointing instructions: "commit work, update PROGRESS.json, and end your session cleanly. The next session picks up from PROGRESS.json."
+- **Plan would exceed agent's context window:** add explicit checkpointing instructions: "commit work, update `plans/{NAME}_PROGRESS.json`, and end your session cleanly. The next session picks up from the progress file."
 
 ## PROGRESS.json — Session Resume Protocol
 
-Every plan must include a PROGRESS.json setup task in Phase 0 and reference it in Worker Instructions. Schema:
+Every plan has its own progress file at `plans/{NAME}_PROGRESS.json`. Phase 0 includes a task to create this file. Schema:
 
 ```json
 {
   "plan": "{NAME}_PLAN.md",
   "started_at": "{ISO timestamp}",
   "phases": {
+    "GATE": {
+      "status": "completed",
+      "tasks": { "GATE.1": "completed" }
+    },
     "0": {
       "status": "in_progress",
       "tasks": { "0.1": "completed", "0.2": "in_progress" }
@@ -391,7 +491,7 @@ Every plan must include a PROGRESS.json setup task in Phase 0 and reference it i
 }
 ```
 
-Worker Instructions must include: "After completing each task, update PROGRESS.json with the task status and timestamp. If your session is ending (context limit, timeout, throttling), commit PROGRESS.json and stop cleanly — do NOT try to squeeze in one more task."
+Worker Instructions must include: "After completing each task, update `plans/{NAME}_PROGRESS.json` with the task status and timestamp. Also update `plans/PLANS_REGISTRY.json` (increment `completed_tasks`, update `last_updated` and `last_agent`). If your session is ending (context limit, timeout, throttling), commit progress files and stop cleanly — do NOT try to squeeze in one more task."
 
 ## Conventional Commits
 
@@ -408,7 +508,7 @@ Scope should match the feature or module name. Message must be a single line, im
 
 ## Relationship to other skills
 
-- **`app-spec`** — produces `app-spec.json`, `APP_SPEC_SUMMARY.md`, and `DEPENDENCY_GRAPH.md`. **This skill requires app-spec as a prerequisite.** If no app-spec exists, invoke the `app-spec` skill in GENERATE mode before planning. The spec provides: feature catalogue (for coverage matrices), architecture and conventions (for Worker Instructions), scripts (for exact build/test/lint commands), schema (for migration-aware task ordering), and dependency graph (for task sequencing). Always list `app-spec.json` as the first entry in the plan's Context Files section.
-- **`plan-runner`** — executes tasks from the plan this skill produces. Handles three modes: run mode (dispatches development tasks to worker agents), test mode (drives the red→green loop for test-focused tasks and verification gates), and prep mode (exports prompts for external models). Also enforces rollback safety for deploy tasks. After a plan completes, `plan-runner` invokes `app-spec` in UPDATE mode to keep the spec current with code changes. The two skills are coupled only through the plan-file format defined in `PLAN_TEMPLATE.md`.
+- **`app-spec`** — produces `.app-spec/app-spec.json`, `.app-spec/APP_SPEC_SUMMARY.md`, and `.app-spec/DEPENDENCY_GRAPH.md`. **This skill requires app-spec as a prerequisite.** If no app-spec exists, invoke the `app-spec` skill in GENERATE mode before planning. The spec provides: feature catalogue (for coverage matrices), architecture and conventions (for Worker Instructions), scripts (for exact build/test/lint commands), schema (for migration-aware task ordering), and dependency graph (for task sequencing). Always list `.app-spec/app-spec.json` as the first entry in the plan's Context Files section.
+- **`plan-runner`** — executes tasks from plans in the `plans/` folder. Handles three modes: run mode (dispatches development tasks to worker agents), test mode (drives the red→green loop for test-focused tasks and verification gates), and prep mode (exports prompts for external models). Also enforces rollback safety for deploy tasks. Checks `plans/PLANS_REGISTRY.json` to skip completed plans. After a plan completes, `plan-runner` marks it `"completed"` in the registry and invokes `app-spec` in UPDATE mode to keep the spec current with code changes. The two skills are coupled only through the plan-file format defined in `PLAN_TEMPLATE.md`.
 - **`engineering:architecture`** / **`engineering:system-design`** — use these BEFORE this skill if the architecture isn't decided.
 - **`engineering:testing-strategy`** — consult for upstream "unit vs E2E vs contract" decisions before planning.

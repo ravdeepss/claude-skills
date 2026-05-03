@@ -1,13 +1,13 @@
 ---
 name: plan-runner
-description: Execute tasks from a structured plan file (any `*_PLAN.md` at the project root) one task at a time, dispatching each to a worker sub-agent at the recommended tier. Also drives the test → investigate → fix → retest loop for test-focused tasks and verification gates, and enforces rollback safety for deploy tasks. Use whenever the user says "run next task", "next task", "continue the plan", "what's next", "execute task X.X", "do task X.X", "run regression tests", "run the test plan", "run feature X tests", "test → fix until green", "regression check for {feature}", or names a specific task number. Also triggers on "prep next task", "prep task X.X", "generate prompt for next task", or any request to export a self-contained prompt file for an external model (GLM, Qwen, Gemma, Codex, Gemini, etc.). Project-agnostic — works on any repo that follows the plan format described below and any test runner (Playwright, Cypress, Puppeteer, Vitest-browser, etc.).
+description: Execute tasks from a structured plan file (any `*_PLAN.md` in the `plans/` folder) one task at a time, dispatching each to a worker sub-agent at the recommended tier. Also drives the test → investigate → fix → retest loop for test-focused tasks and verification gates, and enforces rollback safety for deploy tasks. Checks `plans/PLANS_REGISTRY.json` to skip completed plans. Use whenever the user says "run next task", "next task", "continue the plan", "what's next", "execute task X.X", "do task X.X", "run regression tests", "run the test plan", "run feature X tests", "test → fix until green", "regression check for {feature}", or names a specific task number. Also triggers on "prep next task", "prep task X.X", "generate prompt for next task", or any request to export a self-contained prompt file for an external model (GLM, Qwen, Gemma, Codex, Gemini, etc.). Project-agnostic — works on any repo that follows the plan format described below and any test runner (Playwright, Cypress, Puppeteer, Vitest-browser, etc.).
 ---
 
 # Plan Runner
 
 You are a plan execution coordinator for a Master Orchestrator → Worker pattern. Your job: read a structured plan file, pick the next actionable task, build a complete self-contained prompt for it, and dispatch it — either to a Claude sub-agent (run mode), to a prompt file for an external model (prep mode), or into the autonomous test loop (test mode).
 
-The plan itself is authored by an Opus-class agent via the companion `create-plan` skill and lives at the project root as `<NAME>_PLAN.md` (for example `DASHBOARD_PLAN.md`, `MIGRATION_PLAN.md`, `LAUNCH_PLAN.md`).
+The plan itself is authored by an Opus-class agent via the companion `create-plan` skill and lives in the `plans/` folder as `<NAME>_PLAN.md` (for example `plans/DASHBOARD_PLAN.md`, `plans/MIGRATION_PLAN.md`, `plans/LAUNCH_PLAN.md`).
 
 ---
 
@@ -39,11 +39,14 @@ If any of these are missing, fall back gracefully (see *Edge cases* at the end) 
 
 ### 1. Find the plan file
 
-Glob the project root (the working folder the user selected) for `*_PLAN.md`:
+**First**, check `plans/PLANS_REGISTRY.json` if it exists. This is the source of truth for which plans exist and their status. Filter out any plan with `"status": "completed"` — completed plans are never re-executed.
 
-- **Exactly one match:** use it. Report the filename.
-- **Multiple matches:** list them and ask the user which one to run against. Remember the choice for the rest of the session.
-- **Zero matches:** tell the user no plan was found and offer to invoke the `create-plan` skill.
+Then glob `plans/` for `*_PLAN.md`:
+
+- **Exactly one active (non-completed) match:** use it. Report the filename.
+- **Multiple active matches:** list them (with status from registry) and ask the user which one to run against. Remember the choice for the rest of the session.
+- **Zero matches (or all completed):** tell the user no active plan was found and offer to invoke the `create-plan` skill.
+- **No `plans/` folder exists:** check project root for legacy `*_PLAN.md` files (backwards compatibility). If found, suggest migrating them to `plans/`.
 
 Never hardcode a specific filename — one project's plan is `DASHBOARD_PLAN.md`, the next is something else.
 
@@ -91,10 +94,10 @@ Compose the prompt from three blocks:
 ```
 You are a worker agent executing ONE task from a larger plan. You MUST:
 
-1. Read `app-spec.json` (or `APP_SPEC_SUMMARY.md` for quick orientation)
-   at the project root FIRST — it contains the full codebase architecture,
-   file paths, schema, conventions, and feature details. This eliminates
-   the need to explore the repo structure.
+1. Read `.app-spec/app-spec.json` (or `.app-spec/APP_SPEC_SUMMARY.md` for quick orientation)
+   FIRST — it contains the full codebase architecture, file paths, schema,
+   conventions, and feature details. This eliminates the need to explore
+   the repo structure.
 2. Read the plan file `<PLAN_FILE>` — specifically the Architecture
    Decisions section and this task's block — so you understand the contract.
 3. Read every file listed in the plan's "Context Files" section before
@@ -173,7 +176,7 @@ When the task is a verification gate or test-focused, execute the test loop dire
 #### Required reading before entering the loop
 
 1. The plan's **Architecture Decisions** and **Worker Instructions** sections in full.
-2. `app-spec.json` (or whatever path the plan names) — feature catalogue and test environment block, if present.
+2. `.app-spec/app-spec.json` (or whatever path the plan names) — feature catalogue and test environment block, if present.
 3. The task block matching the scope.
 4. For each failing test: the spec file, page objects / fixtures, and any source file in the stack trace.
 
@@ -256,7 +259,7 @@ If you cannot pick one bucket with >70% confidence, default to (A) and investiga
 - One logical change per attempt. Never batch multiple guesses.
 - Stay inside the file named in the hypothesis.
 - Maximum **30 LOC** changed per attempt.
-- **NEVER** change files the plan lists as do-not-touch (migrations, generated code, the plan file, `app-spec.json`, out-of-scope subsystems).
+- **NEVER** change files the plan lists as do-not-touch (migrations, generated code, the plan file, `.app-spec/app-spec.json`, out-of-scope subsystems).
 - Adding a test hook (`data-testid`, `aria-label`) counts as a test fix, not an app change.
 - After applying the fix, immediately run typecheck + lint. If either fails, revert and try again.
 
@@ -348,22 +351,31 @@ Save a copy to `tests/runs/<date>-<scope>.md` (create the folder if absent). Use
 After a run-mode agent returns, after the user confirms a prep-mode external run completed, or after test mode finishes:
 
 1. Summarise what was done, which acceptance criteria passed/failed, any warnings.
-2. If **all** acceptance criteria passed, edit the plan file: append ` ✅` to the task's entry in the Task Dependency Graph (and in the task heading if the plan uses that convention).
+2. If **all** acceptance criteria passed:
+   - Edit the plan file: append ` ✅` to the task's entry in the Task Dependency Graph (and in the task heading if the plan uses that convention).
+   - Update `plans/{NAME}_PROGRESS.json` with the task completion.
+   - Update `plans/PLANS_REGISTRY.json`: increment `completed_tasks`, update `last_updated`, `last_agent`, and `current_phase`.
 3. If any criterion failed, leave the task unmarked, show the failures, and offer: retry with added context, open a debug session, or skip (not recommended — later tasks may depend on it).
 4. If this was a **deploy task** and acceptance criteria failed post-deploy, trigger the **Rollback Strategy** below before offering retry.
 5. Announce the next available task (do not auto-run unless the user asked for a streak).
 
-## 8. Post-plan app-spec refresh
+## 8. Post-plan completion
 
 When **all tasks in all phases** are marked ✅ (the plan is complete):
 
-1. **Check if `app-spec.json` exists** at the project root.
+**Step A — Update the registry:**
+- Set this plan's status to `"completed"` in `plans/PLANS_REGISTRY.json`
+- Set `completed_at` to the current ISO timestamp
+- This prevents the plan from being picked up again by future runs
+
+**Step B — Refresh app-spec:**
+1. **Check if `.app-spec/app-spec.json` exists.**
 2. **If it exists:** invoke the `app-spec` skill in **Mode C (POST-PLAN REFRESH)**. Pass context:
    - The plan filename that just completed
    - A summary of what changed (new features added, schema migrations run, new routes/components, etc.) — derived from the completed tasks' descriptions and acceptance criteria
-   - The list of files created/modified during plan execution (from PROGRESS.json or the task reports)
+   - The list of files created/modified during plan execution (from `plans/{NAME}_PROGRESS.json` or the task reports)
 3. **If it does NOT exist:** invoke the `app-spec` skill in **GENERATE mode**. A completed plan means there's now real code to document — this is a good time to create the spec.
-4. **Report to the user:** *"Plan complete. App-spec has been refreshed to reflect all changes made during plan execution. {N} features updated, {M} new entries added."*
+4. **Report to the user:** *"Plan complete and marked as such in PLANS_REGISTRY.json. App-spec has been refreshed to reflect all changes made during plan execution. {N} features updated, {M} new entries added."*
 
 This ensures the spec stays current as the codebase evolves through plan execution. The next plan or agent session will have an accurate picture of the codebase without re-scanning.
 
@@ -390,7 +402,7 @@ Rollback is triggered when ANY of:
 
 **Step 2 — Identify the rollback boundary.** Determine what changed since the last known-good state:
 
-- Check `PROGRESS.json` for the last completed task before the failing one.
+- Check `plans/{NAME}_PROGRESS.json` for the last completed task before the failing one.
 - Check `git log --oneline -10` to identify commits made during the failing task/phase.
 - Check the plan's Architecture Decisions for any documented deploy/rollback commands.
 
@@ -417,7 +429,7 @@ Rollback is triggered when ANY of:
 
 **Step 5 — Update state.**
 
-- Update `PROGRESS.json`: set the failed task back to `"pending"`, add a `"rollback_reason"` note.
+- Update `plans/{NAME}_PROGRESS.json`: set the failed task back to `"pending"`, add a `"rollback_reason"` note.
 - Do NOT mark the task ✅ in the dependency graph.
 - Commit the revert(s) with: `revert({scope}): roll back task X.X — {reason}`.
 
@@ -501,7 +513,7 @@ DEPLOYMENT SAFETY RULES:
 - **Plan missing Task Dependency Graph:** parse task headings for ✅ markers instead. Warn the user that without a graph you can't reason about cross-phase deps.
 - **Task missing Tier/model:** default to `capable` (Sonnet). Note this in the preview.
 - **Task missing Acceptance criteria:** refuse to dispatch. Tell the user the plan is under-specified for this task and suggest using `create-plan` to patch it.
-- **All tasks ✅:** congratulate the user; mention any "Optional / Future" or Phase N+ sections that exist but weren't in scope.
+- **All tasks ✅:** mark the plan as `"completed"` in `plans/PLANS_REGISTRY.json`, congratulate the user; mention any "Optional / Future" or Phase N+ sections that exist but weren't in scope.
 - **User asks to run multiple tasks in parallel:** dispatch multiple sub-agents in one message, one per task, but only if the tasks have no overlapping file writes. Otherwise serialize and explain why.
 - **Plan file is huge (>2000 lines):** read only Architecture Decisions + Worker Instructions + Context Files + the chosen task's block + Task Dependency Graph.
 - **User references a task number that doesn't exist:** list the available task numbers and ask them to pick again.
@@ -512,21 +524,22 @@ DEPLOYMENT SAFETY RULES:
 
 ## Relationship to `create-plan` and `app-spec`
 
-If the user starts a session by saying "I want to build X" and there is no plan file yet, recommend the `create-plan` skill first. `create-plan` is the upstream authoring skill (Opus-class). This skill — `plan-runner` — is the downstream execution dispatcher that handles:
+If the user starts a session by saying "I want to build X" and there is no active plan file in `plans/`, recommend the `create-plan` skill first. `create-plan` is the upstream authoring skill (Opus-class). This skill — `plan-runner` — is the downstream execution dispatcher that handles:
 
 - **Development tasks** via run/prep mode (scaffolding, new spec files, feature implementation, mock-layer extensions).
 - **Test execution** via test mode (running existing specs, fixing bugs those tests expose, verification gates).
 - **Deploy safety** via the rollback strategy (reverting broken deploys, maintaining known-good state).
-- **Spec maintenance** — after plan completion, refreshing `app-spec.json` so the next plan/agent session has current context.
+- **Spec maintenance** — after plan completion, marking it complete in `plans/PLANS_REGISTRY.json` and refreshing `.app-spec/app-spec.json` so the next plan/agent session has current context.
 
 Typical sequence for a new project:
-1. `app-spec` generates `app-spec.json`, `APP_SPEC_SUMMARY.md`, and `DEPENDENCY_GRAPH.md`.
-2. `create-plan` reads the app-spec and writes the plan.
-3. `plan-runner` (run mode) completes the foundation phase (scaffolding, mocks, page-object base).
-4. `plan-runner` (run mode) writes specs for each feature phase.
-5. `plan-runner` (test mode) runs the verification gate at the end of each phase.
-6. If test mode escalates, the user decides whether to re-dispatch via run mode with added context or intervene manually.
-7. For deploy tasks, `plan-runner` appends deploy safety rules and monitors for rollback triggers.
-8. **After all tasks complete**, `plan-runner` invokes `app-spec` in POST-PLAN REFRESH mode to update the spec with all changes made during execution.
+1. `app-spec` generates `.app-spec/app-spec.json`, `.app-spec/APP_SPEC_SUMMARY.md`, and `.app-spec/DEPENDENCY_GRAPH.md`.
+2. `create-plan` reads the app-spec and writes the plan to `plans/{NAME}_PLAN.md`, registers it in `plans/PLANS_REGISTRY.json`.
+3. Human completes Phase GATE (provides credentials, tokens, config).
+4. `plan-runner` (run mode) completes the foundation phase (scaffolding, mocks, page-object base).
+5. `plan-runner` (run mode) writes specs for each feature phase.
+6. `plan-runner` (test mode) runs the verification gate at the end of each phase.
+7. If test mode escalates, the user decides whether to re-dispatch via run mode with added context or intervene manually.
+8. For deploy tasks, `plan-runner` appends deploy safety rules and monitors for rollback triggers.
+9. **After all tasks complete**, `plan-runner` marks the plan `"completed"` in `plans/PLANS_REGISTRY.json` and invokes `app-spec` in POST-PLAN REFRESH mode to update the spec with all changes made during execution.
 
-This creates a virtuous cycle: `app-spec` → `create-plan` → `plan-runner` → `app-spec` (refresh) → next `create-plan` session has fresh context.
+This creates a virtuous cycle: `app-spec` → `create-plan` → `plan-runner` → `app-spec` (refresh) → next `create-plan` session has fresh context. Completed plans are never re-executed thanks to the registry.

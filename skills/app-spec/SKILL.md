@@ -1,15 +1,19 @@
 ---
 name: app-spec
-description: Generate a new `app-spec.json` from scratch, or update an existing one, for any software project. Use when the user says "create an app-spec", "generate app-spec.json", "document this codebase as a spec", "write a machine-readable spec for this app", "refresh the app-spec", "update the spec — the code changed", "make an app-spec for ike-tasks / ike-saas / {project}", or passes a repo path and asks for a structured feature/architecture snapshot. Produces a single JSON file at the project root that downstream skills (notably `create-plan` and `plan-runner`) consume as the feature catalogue and architecture-of-record. Works for any stack — OSS client-server, SaaS multi-tenant, CLI, library — by adapting which sections are populated. Also emits an `APP_SPEC_SUMMARY.md` (human+agent-friendly prose digest) and a `DEPENDENCY_GRAPH.md` (Mermaid-based relationship map). Respects `.app-spec.ignore` for excluding files/folders from analysis.
+description: Generate a new `app-spec.json` from scratch, or update an existing one, for any software project. Use when the user says "create an app-spec", "generate app-spec.json", "document this codebase as a spec", "write a machine-readable spec for this app", "refresh the app-spec", "update the spec — the code changed", "make an app-spec for ike-tasks / ike-saas / {project}", or passes a repo path and asks for a structured feature/architecture snapshot. Produces files in the `.app-spec/` folder that downstream skills (notably `create-plan` and `plan-runner`) consume as the feature catalogue and architecture-of-record. Works for any stack — OSS client-server, SaaS multi-tenant, CLI, library — by adapting which sections are populated. Also emits an `APP_SPEC_SUMMARY.md` (human+agent-friendly prose digest) and a `DEPENDENCY_GRAPH.md` (Mermaid-based relationship map). Respects `.app-spec.ignore` for excluding files/folders from analysis.
 ---
 
 # App Spec
 
-You are a staff-engineer-level codebase analyst. Your job: **produce or refresh an `app-spec.json` at the project root** — a single, machine-readable document that captures the app's architecture, technology, data model, API / data layer, frontend surface, and feature list **in enough detail that an AI agent can work on this codebase without re-reading the entire project folder**.
+You are a staff-engineer-level codebase analyst. Your job: **produce or refresh an `app-spec.json` in the project's `.app-spec/` folder** — a single, machine-readable document that captures the app's architecture, technology, data model, API / data layer, frontend surface, and feature list **in enough detail that an AI agent can work on this codebase without re-reading the entire project folder**.
+
+## Output location
+
+**All app-spec artifacts live in `<project-root>/.app-spec/`.** Create this directory if it doesn't exist. This keeps the project root clean and groups all spec-related files together. Downstream skills (`create-plan`, `plan-runner`) know to look here. The `.app-spec.ignore` file remains at the project root (it's a dotfile convention like `.gitignore`).
 
 ## Primary goal — token efficiency
 
-The #1 purpose of app-spec is to **eliminate redundant codebase reads**. Every time an AI model (Opus 4.x, Codex, GLM 5.x, Kimi K2.x, DeepSeek v4.x, etc.) starts a task on this project, it should be able to read `app-spec.json` + `APP_SPEC_SUMMARY.md` and know:
+The #1 purpose of app-spec is to **eliminate redundant codebase reads**. Every time an AI model (Opus 4.x, Codex, GLM 5.x, Kimi K2.x, DeepSeek v4.x, etc.) starts a task on this project, it should be able to read `.app-spec/app-spec.json` + `.app-spec/APP_SPEC_SUMMARY.md` and know:
 
 - What the project does, who it's for, how it's deployed
 - Every file path that matters and what it contains
@@ -24,17 +28,17 @@ If an agent still needs to `grep` the repo to answer a basic structural question
 
 ## Output files
 
-This skill produces three files:
+This skill produces three files, all in `<project-root>/.app-spec/`:
 
-1. **`app-spec.json`** — the canonical machine-readable spec (JSON, optimized for programmatic consumption by AI agents)
-2. **`APP_SPEC_SUMMARY.md`** — a prose digest (~500–1500 words) designed to be dropped into an agent's context window as a quick-start briefing. Covers architecture, key conventions, "things to know before touching this codebase," and a feature index with file paths.
-3. **`DEPENDENCY_GRAPH.md`** — a Mermaid diagram showing relationships between features, data-layer modules, database tables, and API endpoints. Helps agents understand blast radius before making changes.
+1. **`.app-spec/app-spec.json`** — the canonical machine-readable spec (JSON, optimized for programmatic consumption by AI agents)
+2. **`.app-spec/APP_SPEC_SUMMARY.md`** — a prose digest (~500–1500 words) designed to be dropped into an agent's context window as a quick-start briefing. Covers architecture, key conventions, "things to know before touching this codebase," and a feature index with file paths.
+3. **`.app-spec/DEPENDENCY_GRAPH.md`** — a Mermaid diagram showing relationships between features, data-layer modules, database tables, and API endpoints. Helps agents understand blast radius before making changes.
 
 Downstream skills depend on these files:
 
-- `create-plan` reads `app-spec.json` as its primary context source for the project (features, schema, architecture, conventions). If no app-spec exists, `create-plan` invokes this skill first.
-- `plan-runner` reads `testEnvironment` when classifying failures. After a plan completes, `plan-runner` invokes this skill in UPDATE mode to keep the spec current.
-- Any agent starting work on the project reads `APP_SPEC_SUMMARY.md` as its first context file.
+- `create-plan` reads `.app-spec/app-spec.json` as its primary context source for the project (features, schema, architecture, conventions). If no app-spec exists, `create-plan` invokes this skill first.
+- `plan-runner` reads `testEnvironment` from `.app-spec/app-spec.json` when classifying failures. After a plan completes, `plan-runner` invokes this skill in UPDATE mode to keep the spec current.
+- Any agent starting work on the project reads `.app-spec/APP_SPEC_SUMMARY.md` as its first context file.
 
 Every ambiguity you leave in the spec becomes a wrong assumption made by a downstream worker. Write for a worker agent that cannot re-read the repo.
 
@@ -435,23 +439,23 @@ Include: feature→data-layer edges, data-layer→table edges, feature→feature
 
 ### 7. Save & summarize
 
-Write all three files to `<project-root>/`:
-- `app-spec.json`
-- `APP_SPEC_SUMMARY.md`
-- `DEPENDENCY_GRAPH.md`
+Write all three files to `<project-root>/.app-spec/` (create the directory if it doesn't exist):
+- `.app-spec/app-spec.json`
+- `.app-spec/APP_SPEC_SUMMARY.md`
+- `.app-spec/DEPENDENCY_GRAPH.md`
 
 Show the user:
 
 - Paths (`computer://` links if in Cowork).
 - One-paragraph summary: number of tables, number of features, architectural pattern, any sections omitted.
 - Token estimate: approximate token count of app-spec.json (rough: `file_size_bytes / 4`). This helps users gauge context budget.
-- A suggestion: *"Feed this to `create-plan` to generate a development plan, or `create-test-plan` for regression coverage across all {N} features."*
+- A suggestion: *"Feed this to `create-plan` to generate a development plan, or `create-test-plan` for regression coverage across all {N} features. The spec lives in `.app-spec/` — all downstream skills know to look there."*
 
 ## Mode B — UPDATE workflow
 
 ### 1. Load the existing spec
 
-Read `app-spec.json` in full. Capture its `specVersion`, `generatedAt`, `features[*].id`, `database.tables[*].name`, and `frontend.routes[*].path`. These are your baseline.
+Read `.app-spec/app-spec.json` in full. Capture its `specVersion`, `generatedAt`, `features[*].id`, `database.tables[*].name`, and `frontend.routes[*].path`. These are your baseline.
 
 ### 2. Reconcile each section
 
@@ -483,27 +487,27 @@ Workflow: produce a **diff summary** first (list of proposed changes with ration
 
 ### 5. Regenerate companion files
 
-After updating `app-spec.json`, regenerate `APP_SPEC_SUMMARY.md` and `DEPENDENCY_GRAPH.md` to reflect the changes. These are always fully regenerated (not patched) since they're derived from the JSON.
+After updating `.app-spec/app-spec.json`, regenerate `.app-spec/APP_SPEC_SUMMARY.md` and `.app-spec/DEPENDENCY_GRAPH.md` to reflect the changes. These are always fully regenerated (not patched) since they're derived from the JSON.
 
 ### 6. Save & summarize
 
-Same as GENERATE step 7, but the summary is a **diff**: *"Added 3 features, updated 2 tables, removed 1 component. Preserved all hand-curated descriptions and the `parentSpec` block. Regenerated APP_SPEC_SUMMARY.md and DEPENDENCY_GRAPH.md."*
+Same as GENERATE step 7 (all files in `.app-spec/`), but the summary is a **diff**: *"Added 3 features, updated 2 tables, removed 1 component. Preserved all hand-curated descriptions and the `parentSpec` block. Regenerated APP_SPEC_SUMMARY.md and DEPENDENCY_GRAPH.md."*
 
 ## Mode C — POST-PLAN REFRESH (invoked by plan-runner)
 
 When `plan-runner` invokes this skill after a completed plan, it passes context about what changed. This mode is a streamlined UPDATE:
 
-1. **Read the existing `app-spec.json`.**
-2. **Read `PROGRESS.json`** to see which tasks completed and what files were touched.
+1. **Read the existing `.app-spec/app-spec.json`.**
+2. **Read `plans/PROGRESS.json`** (or the plan-specific progress file) to see which tasks completed and what files were touched.
 3. **Scan only the files that changed** (from git diff or PROGRESS.json notes) — don't re-scan the entire codebase.
 4. **Patch the spec** with: new features added, new routes/components/hooks, schema changes from any migrations that ran, new or updated data-layer functions, updated test environment.
-5. **Regenerate `APP_SPEC_SUMMARY.md` and `DEPENDENCY_GRAPH.md`.**
+5. **Regenerate `.app-spec/APP_SPEC_SUMMARY.md` and `.app-spec/DEPENDENCY_GRAPH.md`.**
 6. **Bump `specVersion`** minor and add a `changeLog` entry: `"Post-plan refresh after {PLAN_NAME} completion."`
 7. **Do not prompt the user** — this mode runs autonomously. If drift is ambiguous, leave the existing value and add a `"_confidence": "inferred"` annotation for the user to review later.
 
 ## Edge cases
 
-- **Monorepo with multiple apps** — write one spec per app (`apps/web/app-spec.json`, `apps/mobile/app-spec.json`) plus a top-level `workspace-spec.json` that points at each. Don't try to cram two apps into one file.
+- **Monorepo with multiple apps** — write one spec per app (`apps/web/.app-spec/app-spec.json`, `apps/mobile/.app-spec/app-spec.json`) plus a top-level `.app-spec/workspace-spec.json` that points at each. Don't try to cram two apps into one file.
 - **Pre-production project (code doesn't run yet)** — still generate the spec, but mark every unimplemented feature `status: "planned"`. This is a legitimate snapshot of intent.
 - **No clear schema source** — if migrations are scattered or there's no ORM, create a Phase 0 task for `create-plan` to write a `SCHEMA.md` first, and stub `database.tables` with `"status": "needs-schema-doc"`.
 - **Huge app (>50 features)** — still one spec. Split `features` into logical groups via a `group` field (`group: "productivity"`) rather than splitting the file.
@@ -512,9 +516,9 @@ When `plan-runner` invokes this skill after a completed plan, it passes context 
 
 ## Relationship to other skills
 
-- `app-spec` (this skill) → ground-truth document + companion files.
-- `create-plan` checks for `app-spec.json` as its **first step**. If present, it uses it as the primary context source (features, schema, architecture, conventions, scripts). If absent, `create-plan` invokes this skill in GENERATE mode before proceeding with planning.
-- `plan-runner` reads `testEnvironment` when classifying failures into the 5 buckets. **After a plan completes** (all tasks ✅), `plan-runner` invokes this skill in **Mode C (POST-PLAN REFRESH)** to keep the spec in sync with the code changes made during plan execution.
+- `app-spec` (this skill) → ground-truth document + companion files in `.app-spec/`.
+- `create-plan` checks for `.app-spec/app-spec.json` as its **first step**. If present, it uses it as the primary context source (features, schema, architecture, conventions, scripts). If absent, `create-plan` invokes this skill in GENERATE mode before proceeding with planning.
+- `plan-runner` reads `testEnvironment` from `.app-spec/app-spec.json` when classifying failures into the 5 buckets. **After a plan completes** (all tasks ✅), `plan-runner` invokes this skill in **Mode C (POST-PLAN REFRESH)** to keep the spec in sync with the code changes made during plan execution.
 - `engineering:system-design` / `engineering:architecture` can _consume_ this file when writing ADRs, but don't use those skills to produce the spec itself — they don't enforce the schema shape.
 - Any agent starting work on this project should read `APP_SPEC_SUMMARY.md` first — it's the cheapest way to load full project context.
 
@@ -526,6 +530,6 @@ The spec will be read by agents far more often than it's written. Optimize for r
 - **Use arrays of objects with `id`/`name` fields** rather than nested maps. This makes grep/search predictable: `"id": "task-management"` is easier to locate than a deeply nested key.
 - **Keep string values dense.** "React 19 SPA with Vite bundler, TanStack Query for server state, Tailwind CSS" is better than a paragraph explaining each choice.
 - **The `fileTree` pays for itself.** A 200-token file tree saves 2000+ tokens of agent `ls`/`find`/`glob` exploration on every future session.
-- **`APP_SPEC_SUMMARY.md` is the quick path.** For simple tasks, an agent can read just the summary (~400-800 tokens) instead of the full JSON (~3000-8000 tokens). The summary should be self-sufficient for orientation; the JSON is for when the agent needs exact file paths, column types, or function signatures.
+- **`.app-spec/APP_SPEC_SUMMARY.md` is the quick path.** For simple tasks, an agent can read just the summary (~400-800 tokens) instead of the full JSON (~3000-8000 tokens). The summary should be self-sufficient for orientation; the JSON is for when the agent needs exact file paths, column types, or function signatures.
 
 Keep the spec accurate and current. It's the one file every other skill in the stack trusts.

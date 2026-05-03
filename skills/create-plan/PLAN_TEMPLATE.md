@@ -1,8 +1,9 @@
 # {PROJECT NAME} — {NAME}_PLAN.md
 
 > Fill in every placeholder below. Delete this top comment block when saving.
-> File name on disk: `{NAME}_PLAN.md` at the project root.
+> File name on disk: `plans/{NAME}_PLAN.md` (all plans live in the `plans/` folder).
 > This template is the exact shape `plan-runner` expects. Do not rename sections.
+> Also create/update `plans/PLANS_REGISTRY.json` and `plans/{NAME}_PROGRESS.json`.
 
 ---
 
@@ -35,11 +36,11 @@ This section tells `plan-runner` how to dispatch tasks.
 
 ---
 
-## Session Resume — PROGRESS.json
+## Session Resume — plans/{NAME}_PROGRESS.json
 
-> This file lives at the project root. Every worker reads it before starting and
-> writes it after every task. If a session dies, the next session resumes from here.
-> Phase 0 includes a task to create this file. Schema:
+> This file lives in the `plans/` folder (named per-plan to support multiple concurrent plans).
+> Every worker reads it before starting and writes it after every task. If a session dies,
+> the next session resumes from here. Phase 0 includes a task to create this file. Schema:
 
 ```json
 {
@@ -47,6 +48,10 @@ This section tells `plan-runner` how to dispatch tasks.
   "started_at": "",
   "execution_model": "{single-agent-sequential | orchestrator-with-N-subagents}",
   "phases": {
+    "GATE": {
+      "status": "pending",
+      "tasks": { "GATE.1": "pending" }
+    },
     "0": {
       "status": "pending",
       "tasks": { "0.1": "pending", "0.2": "pending" }
@@ -70,7 +75,7 @@ Workers append to `"learnings"` when they discover gotchas, workarounds, or non-
 Non-negotiable choices every worker must respect. Keep it short and absolute — if a decision is still open, resolve it first.
 
 - **Runtime / deployment model:** {e.g., "Next.js on Vercel, Supabase backend"}
-- **Source of truth:** {e.g., "`app-spec.json` for features, Supabase migrations for schema"}
+- **Source of truth:** {e.g., "`.app-spec/app-spec.json` for features, Supabase migrations for schema"}
 - **Data / parsing contract:** {e.g., "TypeScript types generated from Supabase — do NOT hand-write DB types"}
 - **Conventions:** {module structure, naming, units, directory layout}
 - **Libraries / dependency policy:** {e.g., "use existing deps only, no new npm packages without approval"}
@@ -88,7 +93,7 @@ Every worker agent receives this section as part of its preamble. These are impe
 
 1. Read this plan file first — Architecture Decisions, Agentic Architecture Configuration, and your assigned task block.
 2. Read each file listed in the "Context Files" section below before writing code.
-3. Read `PROGRESS.json` at the project root to confirm your task is next and no prior task is incomplete.
+3. Read `plans/{NAME}_PROGRESS.json` to confirm your task is next and no prior task is incomplete.
 4. Stay within the scope of your task's Spec and Acceptance Criteria. Do not refactor adjacent code or "improve" unrelated areas.
 
 ### Quality Ritual — execute this for EVERY code task
@@ -130,7 +135,8 @@ This is the heartbeat of the plan. Every task that produces code follows this ri
   - Do NOT defer this to "later" — learnings not saved immediately are lost when the session dies.
 
 **Step 7 — Update progress:**
-  - Update `PROGRESS.json` with the completed task status and timestamp.
+  - Update `plans/{NAME}_PROGRESS.json` with the completed task status and timestamp.
+  - Update `plans/PLANS_REGISTRY.json` (increment `completed_tasks`, update `last_updated`).
   - If this is the last task in a phase, set the phase status to `"completed"`.
 
 ### Prohibitions
@@ -165,19 +171,54 @@ The next session reads PROGRESS.json and picks up exactly where you left off.
 
 Paths (project-root-relative) that every worker should read before starting. If a file doesn't exist yet, add a Phase 0 task to create it and note `(created by Task 0.X)` next to it.
 
-- `app-spec.json` — full codebase spec: architecture, schema, features, conventions, scripts (read this FIRST — it eliminates the need to explore the repo)
-- `APP_SPEC_SUMMARY.md` — prose digest of the codebase for quick orientation
+- `.app-spec/app-spec.json` — full codebase spec: architecture, schema, features, conventions, scripts (read this FIRST — it eliminates the need to explore the repo)
+- `.app-spec/APP_SPEC_SUMMARY.md` — prose digest of the codebase for quick orientation
 - `{path}` — {description}
 - `{path}` — {description}
 
-Keep this list tight — anything listed becomes required reading for every worker, which costs tokens. Note: `app-spec.json` is large but pays for itself by eliminating codebase exploration.
+Keep this list tight — anything listed becomes required reading for every worker, which costs tokens. Note: `.app-spec/app-spec.json` is large but pays for itself by eliminating codebase exploration.
 
 ---
 
-## Phase 0 — Foundation  (must complete before all other phases)
+## Phase GATE — Human Input Collection  (must complete before Phase 0)
+
+> This phase collects everything agents cannot obtain on their own. By front-loading
+> human dependencies, plan progress is never stalled waiting on a person mid-execution.
+
+### Task GATE.1 — Collect required human inputs
+
+**Goal:** Present the human operator with a checklist of inputs needed for this plan to execute unblocked.
+
+**Checklist:**
+
+Required items (plan CANNOT proceed without these):
+- [ ] {item — e.g., "AWS credentials (access key + secret) for deployment tasks"}
+- [ ] {item — e.g., "GitHub PAT with repo + workflow scopes for CI setup"}
+- [ ] {item — e.g., "Production database connection string"}
+- [ ] {item — e.g., "DNS domain and registrar access"}
+
+Optional items (plan can proceed without, but some tasks may be limited):
+- [ ] {item — e.g., "Brand assets (logo SVG, color palette) for UI polish tasks"}
+- [ ] {item — e.g., "MCP server access for integration features"}
+- [ ] {item — e.g., "Seed data or sample content for demo/test fixtures"}
+
+**Instructions for the human:**
+1. Check off each item as you provide it.
+2. For credentials: store them in `.env.local` (gitignored) or your secrets manager.
+3. For optional items: mark as "skipped" if not available — affected tasks will be flagged.
+4. Once all required items are checked, mark this task complete.
+
+**Acceptance criteria:**
+1. All required items are provided and accessible to agents
+2. Optional items are either provided or explicitly marked "skipped"
+3. Task marked complete in `plans/{NAME}_PROGRESS.json`
+
+---
+
+## Phase 0 — Foundation  (must complete before all other phases; requires Phase GATE)
 
 > For new projects: includes full bootstrap (repo setup, CI/CD, test runner, state tracking, quality gates).
-> For existing projects: verify build, verify test runner, create missing context files, set up PROGRESS.json.
+> For existing projects: verify build, verify test runner, create missing context files, set up progress tracking.
 
 ### Task 0.1 — {short imperative name}
 
@@ -297,7 +338,12 @@ These are not fully specced. Flesh them out when scheduled phases are done.
 > Execution model: {single-agent-sequential | orchestrator-with-N-subagents}
 > Max concurrent tasks: {1 | N}
 
-Phase 0 (foundation, gates everything):
+Phase GATE (human input collection, gates everything):
+```
+  GATE.1 — Collect required human inputs
+```
+
+Phase 0 (foundation, requires Phase GATE):
 ```
   0.1 — {name}
   0.2 — {name}    (requires 0.1)
@@ -326,4 +372,5 @@ Phase N (Optional / Future — not scheduled):
 
 ---
 
-> **Note:** PROGRESS.json schema is defined in the "Session Resume" section near the top of this plan.
+> **Note:** Progress tracking schema is defined in the "Session Resume" section near the top of this plan.
+> Progress is stored in `plans/{NAME}_PROGRESS.json`. Overall plan status is tracked in `plans/PLANS_REGISTRY.json`.
