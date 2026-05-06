@@ -1,0 +1,185 @@
+{
+  "$schema": "hermes-model-config-schema",
+  "version": "2.0",
+  "last_updated": "2026-05-06",
+  "notes": "Single source of truth for Hermes agent model routing. Update this file when models/providers/budgets change. All project CLAUDE.md files point here. See hermes-agent-model-strategy-guide.md for full rationale.",
+
+  "budget": {
+    "metered": {
+      "deepseek_v4_pro": { "monthly_usd": 10, "notes": "Promo pricing (~$0.14/MTok blended) through May 31, 2026. Post-promo: ~$0.55/MTok blended." },
+      "gemma_4_31b":     { "monthly_usd": 20, "notes": "$0.19/MTok blended via OpenRouter/Fireworks." }
+    },
+    "fixed_subscriptions": {
+      "zai_coding_plan": { "models": ["glm-5.1", "glm-5-turbo", "glm-4.7"], "notes": "~5x Claude Pro equivalent, ~250+ heavy coding sessions/month" },
+      "kimi_moderato":   { "models": ["kimi-k2.6"], "notes": "Limited monthly allowance — use strategically" }
+    }
+  },
+
+  "models": {
+    "deepseek-v4-pro": {
+      "provider": "deepseek",
+      "api_base": "https://api.deepseek.com",
+      "params_active": "49B",
+      "architecture": "MoE (1.6T total)",
+      "context_window": 1000000,
+      "intelligence_index": 52,
+      "swe_bench": 80.6,
+      "cost_model": "metered",
+      "openai_compatible": true
+    },
+    "glm-5.1": {
+      "provider": "zai",
+      "params_active": "40B",
+      "architecture": "MoE (744B total)",
+      "context_window": 200000,
+      "intelligence_index": 51,
+      "cost_model": "plan",
+      "strengths": ["8hr sustained execution", "655+ iterations", "SWE-Bench Pro #1"],
+      "openai_compatible": true
+    },
+    "glm-5-turbo": {
+      "provider": "zai",
+      "context_window": 200000,
+      "intelligence_index": 45,
+      "cost_model": "plan",
+      "strengths": ["fast inference", "supervised agent tasks"],
+      "openai_compatible": true
+    },
+    "glm-4.7": {
+      "provider": "zai",
+      "context_window": 200000,
+      "intelligence_index": 40,
+      "cost_model": "plan",
+      "strengths": ["cheapest Z.ai model", "routine infra/config"],
+      "openai_compatible": true
+    },
+    "kimi-k2.6": {
+      "provider": "moonshot",
+      "params_active": "32B",
+      "architecture": "MoE (1T total)",
+      "context_window": 256000,
+      "intelligence_index": 54,
+      "cost_model": "plan",
+      "strengths": ["highest raw intelligence", "agent swarm native", "multimodal"],
+      "openai_compatible": true,
+      "usage_caps": { "max_tokens": 4096, "mode": "instant", "notes": "Always cap output and use Instant mode to conserve Moderato allowance" }
+    },
+    "gemma-4-31b": {
+      "provider": "openrouter",
+      "params_active": "31B",
+      "architecture": "Dense",
+      "context_window": 256000,
+      "intelligence_index": 35,
+      "cost_model": "metered",
+      "license": "Apache 2.0",
+      "strengths": ["multimodal", "great math", "dirt cheap iteration"],
+      "openai_compatible": true
+    }
+  },
+
+  "routing": {
+    "orchestrator": {
+      "description": "Planning, decomposition, routing, and QA gate",
+      "primary": "deepseek-v4-pro",
+      "fallback": "glm-5-turbo",
+      "fallback_trigger": "Budget exhaustion late in month",
+      "notes": "1M context critical for holding full project plan + agent outputs. Use prompt caching aggressively."
+    },
+
+    "roles": {
+      "principal_engineer": {
+        "description": "System design, architecture reviews, complex trade-off analysis, MCP schema design",
+        "primary": "kimi-k2.6",
+        "fallback": "glm-5.1",
+        "usage_pattern": "Strategic escalation only — 3-5 calls/week max",
+        "when_to_fallback": "80% of architectural questions that are solid engineering judgment rather than genuinely novel"
+      },
+      "senior_fullstack_dev": {
+        "description": "Feature implementation, MCP server/client code, API development, database work",
+        "primary": "deepseek-v4-pro",
+        "escalation": "glm-5.1",
+        "escalation_trigger": "Marathon sessions — entire MCP servers, complex end-to-end features, multi-file refactors"
+      },
+      "senior_frontend_dev": {
+        "description": "React/Next.js components, Tailwind/CSS, responsive layouts, full page builds",
+        "primary": "glm-5.1",
+        "iteration_engine": "gemma-4-31b",
+        "notes": "Gemma for rapid prototyping and layout variations; GLM-5.1 for polish and integration"
+      },
+      "ux_designer": {
+        "description": "UX audit, user flow design, design system specs, accessibility review",
+        "primary": "kimi-k2.6",
+        "iteration_engine": "gemma-4-31b",
+        "usage_pattern": "2-4 Kimi calls/week for UX review. Gemma handles all exploration."
+      },
+      "cloud_engineer": {
+        "description": "AWS CDK/CloudFormation, Supabase, Vercel, CI/CD, cost optimization",
+        "primary": "deepseek-v4-pro",
+        "utility": "glm-4.7",
+        "utility_scope": "Dockerfile tweaks, env configs, simple Terraform, nginx, docker-compose"
+      },
+      "qa_engineer": {
+        "description": "Test generation, code review, test coverage analysis, linting",
+        "primary": "gemma-4-31b",
+        "escalation": "deepseek-v4-pro",
+        "escalation_trigger": "Security reviews, complex logic verification, race conditions, architectural code review"
+      },
+      "java_specialist": {
+        "description": "Spring Boot services, migration work, API integration, JPA/Hibernate",
+        "primary": "glm-5.1",
+        "fallback": "deepseek-v4-pro"
+      }
+    },
+
+    "quick_reference": {
+      "plan_and_decompose":       "deepseek-v4-pro",
+      "architecture_decision":    "kimi-k2.6",
+      "second_opinion_design":    "glm-5.1",
+      "backend_code_short":       "deepseek-v4-pro",
+      "backend_code_marathon":    "glm-5.1",
+      "java_spring_boot":         "glm-5.1",
+      "react_nextjs_build":       "glm-5.1",
+      "react_nextjs_iterate":     "gemma-4-31b",
+      "ux_audit":                 "kimi-k2.6",
+      "ux_explore":               "gemma-4-31b",
+      "mcp_server_marathon":      "glm-5.1",
+      "aws_supabase_vercel":      "deepseek-v4-pro",
+      "dockerfile_cicd":          "glm-4.7",
+      "code_review_first_pass":   "gemma-4-31b",
+      "code_review_escalation":   "deepseek-v4-pro",
+      "test_generation":          "gemma-4-31b",
+      "security_review":          "deepseek-v4-pro",
+      "brainstorm_rough_draft":   "gemma-4-31b",
+      "rapid_ui_prototyping":     "gemma-4-31b",
+      "quick_config_simple_task": "glm-4.7"
+    }
+  },
+
+  "plan_tier_mapping": {
+    "_description": "When create-plan assigns a 'recommended_model' tier to a task, use this mapping to resolve to a concrete model.",
+    "tier_frontier": "kimi-k2.6",
+    "tier_strong": "deepseek-v4-pro",
+    "tier_worker": "glm-5.1",
+    "tier_fast": "glm-5-turbo",
+    "tier_cheap": "gemma-4-31b",
+    "tier_utility": "glm-4.7"
+  },
+
+  "cost_control": [
+    "Cache DeepSeek system prompts aggressively — cache hits are 1/10th input price",
+    "Use GLM-5-Turbo as overflow orchestrator when DeepSeek budget runs thin",
+    "Route pattern-matching tasks to Gemma before frontier models",
+    "Cap Kimi output at max_tokens=4096, always use Instant mode",
+    "Batch exploration on Gemma — generate 3-4 options, escalate only the best",
+    "Monitor DeepSeek promo expiry (May 31, 2026) and adjust orchestrator strategy"
+  ],
+
+  "api_providers": {
+    "deepseek-v4-pro": { "provider": "DeepSeek Direct", "endpoint": "https://api.deepseek.com" },
+    "glm-5.1":         { "provider": "Z.ai Coding Plan" },
+    "glm-5-turbo":     { "provider": "Z.ai Coding Plan" },
+    "glm-4.7":         { "provider": "Z.ai Coding Plan" },
+    "kimi-k2.6":       { "provider": "Moonshot AI (Moderato Plan)" },
+    "gemma-4-31b":     { "provider": "OpenRouter or Fireworks", "notes": "Single-router fallback for DeepSeek+Gemma if direct APIs have downtime" }
+  }
+}
