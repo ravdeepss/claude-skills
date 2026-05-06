@@ -33,6 +33,8 @@ This section tells `plan-runner` how to dispatch tasks.
 - **Session limits:** {e.g., "GLM-5.1 on Hermes: ~60min sessions, ~32K context window"}
 - **Provider fallback order:** {e.g., "GLM-5.1 → Kimi-K2.6 → Claude Sonnet"}
 - **Task sizing target:** {e.g., "Each task should complete in < 20 min to stay within session limits"}
+- **Model routing config:** {`hermes-model-config.json` loaded | no config — using generic defaults}
+- **Model overrides:** {list any user-specified overrides, e.g., "All architecture tasks → Kimi K2.6 (user override)" | "None — using config defaults"}
 
 ---
 
@@ -172,6 +174,7 @@ The next session reads PROGRESS.json and picks up exactly where you left off.
 Paths (project-root-relative) that every worker should read before starting. If a file doesn't exist yet, add a Phase 0 task to create it and note `(created by Task 0.X)` next to it.
 
 - `.app-spec/app-spec.json` — full codebase spec: architecture, schema, features, conventions, scripts (read this FIRST — it eliminates the need to explore the repo)
+- `hermes-model-config.json` — model routing config: tier→model mapping, role-based routing, budget constraints (used by plan-runner for dispatch decisions) *(include only if the file exists in the project)*
 - `.app-spec/APP_SPEC_SUMMARY.md` — prose digest of the codebase for quick orientation
 - `{path}` — {description}
 - `{path}` — {description}
@@ -254,7 +257,7 @@ Optional items (plan can proceed without, but some tasks may be limited):
    - Commit: `{type}({scope}): {description}`
 
 **Tier:** capable
-**Suggested model:** {e.g., "Sonnet, GLM-5.1"}
+**Suggested model:** {resolved from hermes-model-config.json if available; otherwise e.g., "Sonnet, GLM-5.1"}
 
 **Acceptance criteria:**
 1. {Observable check 1 — a command to run and expected output}

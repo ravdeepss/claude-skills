@@ -50,6 +50,28 @@ Then glob `plans/` for `*_PLAN.md`:
 
 Never hardcode a specific filename — one project's plan is `DASHBOARD_PLAN.md`, the next is something else.
 
+### 1b. Load model routing config
+
+After finding the plan file, check the project root (and the workspace folder) for `hermes-model-config.json`.
+
+**If found:**
+- Read it. This overrides the default tier→model mapping in step 6a.
+- Use its `plan_tier_mapping` to resolve tiers: `tier_cheap` → the configured cheap model, `tier_worker` → the configured worker model, etc.
+- Use its `routing.quick_reference` for task-nature-specific routing (e.g., a frontend build task routes to the `react_nextjs_build` model, not just the generic tier model).
+- Use its `routing.roles` for role-specific routing when the task's description matches a known role (e.g., QA tasks → `qa_engineer.primary`).
+- Check the plan's **Agentic Architecture Configuration** section for any user-specified model overrides — these take precedence over the config file.
+
+**If not found:**
+- Use the default tier→model mapping from step 6a (cheap→haiku, capable→sonnet, heavy→opus).
+- Check if the plan's task block has a "Suggested model" field and use that as a hint.
+
+**Override priority (highest to lowest):**
+1. User explicitly says "use X model for this task" in the current conversation
+2. Plan's Agentic Architecture Configuration section lists model overrides
+3. Task's "Suggested model" field in the plan
+4. `hermes-model-config.json` routing (by task nature, then by tier)
+5. Default tier→model mapping (cheap→haiku, capable→sonnet, heavy→opus)
+
 ### 2. Determine the next task
 
 Read the chosen plan. Locate the **Task Dependency Graph** section at the bottom. Tasks marked ✅ are complete. Find the lowest-numbered task that:
@@ -77,7 +99,7 @@ Before dispatching, show:
 
 - **Plan:** filename
 - **Task:** number and name
-- **Tier / model:** `cheap|capable|heavy` and the suggested model from the task block
+- **Tier / model:** `cheap|capable|heavy` and the resolved model (from user override → plan config → hermes-model-config.json → task block → default mapping, in priority order)
 - **Summary:** one sentence from the Goal
 - **Dependencies:** which ✅ tasks this builds on
 - **Mode:** run, prep, or test
@@ -130,13 +152,22 @@ Report format:
 
 Map the task's **Tier** to a Claude model:
 
+**Default tier→model mapping** (used when no `hermes-model-config.json` is loaded and no model override applies):
+
 | Tier      | Model       |
 |-----------|-------------|
 | cheap     | `haiku`     |
 | capable   | `sonnet`    |
 | heavy     | `opus`      |
 
-If the task names a non-Claude suggested model (Qwen, Gemma, GLM, Codex, Gemini, …), **do not try to dispatch** — automatically switch to prep mode and tell the user why. Non-Claude models can't be invoked from the Agent tool; they need the copy-paste prompt.
+**If `hermes-model-config.json` was loaded in step 1b**, resolve the model from the config instead:
+- Use `plan_tier_mapping` for tier-based resolution (e.g., `tier_cheap` might map to `gemma-4-31b`, `tier_worker` to `glm-5.1`).
+- Use `routing.quick_reference` if the task nature is identifiable (e.g., `test_generation` → the configured QA model).
+- If the resolved model is a non-Claude model (anything not haiku/sonnet/opus), **automatically switch to prep mode** and tell the user why — non-Claude models can't be invoked from the Agent tool and need the exported prompt file. Include the resolved model name in the prep-mode output so the user knows which model to target.
+
+**User overrides:** If the user explicitly names a model in the current conversation ("use Sonnet for this one", "dispatch to GLM-5.1"), respect that. For Claude models (haiku/sonnet/opus), dispatch directly. For non-Claude models, switch to prep mode with the specified model noted.
+
+If the task names a non-Claude suggested model (Qwen, Gemma, GLM, Codex, Gemini, …) — whether from the config or the plan — **do not try to dispatch** — automatically switch to prep mode and tell the user why. Non-Claude models can't be invoked from the Agent tool; they need the copy-paste prompt.
 
 Call the Agent tool:
 
@@ -162,7 +193,7 @@ Write the prompt to `<project-root>/task-X.X-prompt.md` with these sections, in 
 Then tell the user:
 
 - The absolute path to the prompt file (via a `computer://` link if in Cowork).
-- The tier and fitting external models (e.g. "capable tier → GLM-4, Sonnet, Qwen-Coder-32B, Codex").
+- The tier and recommended model. If `hermes-model-config.json` was loaded, name the specific model from the config (e.g., "capable tier → glm-5.1 per hermes-model-config.json"). Otherwise, suggest fitting external models (e.g., "capable tier → GLM-4, Sonnet, Qwen-Coder-32B, Codex"). If the user specified a model override, use that instead.
 - Reminder: "Paste this into your model. When it returns modified files, drop them back in the project and tell me — I'll verify against the acceptance criteria and mark the task ✅."
 
 Do **not** mark the task ✅ yet in prep mode — wait for the user to confirm the external run succeeded.
@@ -511,7 +542,7 @@ DEPLOYMENT SAFETY RULES:
 ## Edge cases
 
 - **Plan missing Task Dependency Graph:** parse task headings for ✅ markers instead. Warn the user that without a graph you can't reason about cross-phase deps.
-- **Task missing Tier/model:** default to `capable` (Sonnet). Note this in the preview.
+- **Task missing Tier/model:** default to `capable`. Resolve the model from `hermes-model-config.json` (if loaded) using `plan_tier_mapping.tier_worker`, otherwise default to Sonnet. Note this in the preview.
 - **Task missing Acceptance criteria:** refuse to dispatch. Tell the user the plan is under-specified for this task and suggest using `create-plan` to patch it.
 - **All tasks ✅:** mark the plan as `"completed"` in `plans/PLANS_REGISTRY.json`, congratulate the user; mention any "Optional / Future" or Phase N+ sections that exist but weren't in scope.
 - **User asks to run multiple tasks in parallel:** dispatch multiple sub-agents in one message, one per task, but only if the tasks have no overlapping file writes. Otherwise serialize and explain why.
