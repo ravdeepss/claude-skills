@@ -12,6 +12,11 @@ A small repository of reusable Claude skill definitions for planning and executi
   - Designed to dispatch each task to a worker model or export a prompt for an external model.
 - `skills/create-plan/PLAN_TEMPLATE.md`
   - A template showing the exact plan format expected by `plan-runner`.
+- `skills/clief-bootstrap/SKILL.md`
+  - A skill for bootstrapping projects using the CLIEF three-layer folder architecture (map, rooms, tools).
+  - Works for new projects and restructuring existing ones. Cross-model compatible (Claude, GLM, DeepSeek, Kimi, Gemma).
+- `skills/clief-bootstrap/EXAMPLES.md`
+  - Three complete examples (content creator, freelancer, developer) showing the architecture adapted for different use cases.
 
 ## Purpose
 
@@ -46,6 +51,9 @@ Use it to:
     - `PLAN_TEMPLATE.md`
   - `plan-runner/`
     - `SKILL.md`
+  - `clief-bootstrap/`
+    - `SKILL.md`
+    - `EXAMPLES.md`
 
 ## Extending this workspace
 
