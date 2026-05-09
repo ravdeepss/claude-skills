@@ -37,3 +37,4 @@ Current skills:
 - `clief-bootstrap` — Bootstrap CLIEF three-layer folder architecture
 - `app-spec` — Generate application specification from a codebase
 - `test-runner` — Execute test suites and report results
+- `model-strategy` — Generate model routing strategy and config for agentic companies (any domain)

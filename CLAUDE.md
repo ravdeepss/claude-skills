@@ -1,6 +1,6 @@
 # claude-skills
 
-A collection of reusable AI agent skill definitions — create-plan, plan-runner, clief-bootstrap, app-spec, test-runner — plus Hermes multi-agent model routing configuration. This is a skills repo, not a project execution workspace.
+A collection of reusable AI agent skill definitions — create-plan, plan-runner, clief-bootstrap, app-spec, test-runner, model-strategy — plus multi-agent model routing configuration. This is a skills repo, not a project execution workspace.
 
 ## Workspaces
 - /skills — Skill definition authoring and maintenance (all skills)
@@ -10,7 +10,9 @@ A collection of reusable AI agent skill definitions — create-plan, plan-runner
 | Task | Go to | Read |
 |------|-------|------|
 | Author or update a skill | /skills | CONTEXT.md |
-| Configure model routing | / (root) | hermes-model-config.json, hermes-agent-model-strategy-guide.md |
+| Configure model routing | / (root) | model-config.json, model-strategy-guide.md |
+| Generate model routing config from scratch | /skills/model-strategy | SKILL.md |
+| Legacy Hermes routing (reference) | / (root) | hermes-model-config.json, hermes-agent-model-strategy-guide.md |
 
 ## Naming conventions
 - Skills: `skills/{skill-name}/SKILL.md`

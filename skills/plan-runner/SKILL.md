@@ -52,7 +52,16 @@ Never hardcode a specific filename — one project's plan is `DASHBOARD_PLAN.md`
 
 ### 1b. Load model routing config
 
-After finding the plan file, check the project root (and the workspace folder) for `hermes-model-config.json`.
+After finding the plan file, search for `model-config.json` using the following lookup hierarchy (check all locations, first file found at the highest-priority location wins):
+
+1. **Agent base data directory** (lowest priority) — e.g., `/opt/data/` for a Hermes agent, or whatever the agent's configured data root is. This is the org-wide / agent-wide default.
+2. **Project root** — the root of the current project/repo.
+3. **Workspace folder** — the active workspace directory within the project (if different from project root).
+4. **User provided** (highest priority) — if the user explicitly provides a config file path or passes overrides in the conversation, that takes precedence over all discovered files.
+
+Check each location in order. If `model-config.json` is found at multiple locations, use the one from the highest-priority location.
+
+> **Backwards compatibility:** If no `model-config.json` is found but a legacy `hermes-model-config.json` exists at any of the above locations, use it as a fallback. Log a note to the user suggesting they rename to the generic name.
 
 **If found:**
 - Read it. This overrides the default tier→model mapping in step 6a.
@@ -69,7 +78,7 @@ After finding the plan file, check the project root (and the workspace folder) f
 1. User explicitly says "use X model for this task" in the current conversation
 2. Plan's Agentic Architecture Configuration section lists model overrides
 3. Task's "Suggested model" field in the plan
-4. `hermes-model-config.json` routing (by task nature, then by tier)
+4. `model-config.json` routing (by task nature, then by tier)
 5. Default tier→model mapping (cheap→haiku, capable→sonnet, heavy→opus)
 
 ### 2. Determine the next task
@@ -99,7 +108,7 @@ Before dispatching, show:
 
 - **Plan:** filename
 - **Task:** number and name
-- **Tier / model:** `cheap|capable|heavy` and the resolved model (from user override → plan config → hermes-model-config.json → task block → default mapping, in priority order)
+- **Tier / model:** `cheap|capable|heavy` and the resolved model (from user override → plan config → model-config.json → task block → default mapping, in priority order)
 - **Summary:** one sentence from the Goal
 - **Dependencies:** which ✅ tasks this builds on
 - **Mode:** run, prep, or test
@@ -152,7 +161,7 @@ Report format:
 
 Map the task's **Tier** to a Claude model:
 
-**Default tier→model mapping** (used when no `hermes-model-config.json` is loaded and no model override applies):
+**Default tier→model mapping** (used when no `model-config.json` is loaded and no model override applies):
 
 | Tier      | Model       |
 |-----------|-------------|
@@ -160,7 +169,7 @@ Map the task's **Tier** to a Claude model:
 | capable   | `sonnet`    |
 | heavy     | `opus`      |
 
-**If `hermes-model-config.json` was loaded in step 1b**, resolve the model from the config instead:
+**If `model-config.json` was loaded in step 1b**, resolve the model from the config instead:
 - Use `plan_tier_mapping` for tier-based resolution (e.g., `tier_cheap` might map to `gemma-4-31b`, `tier_worker` to `glm-5.1`).
 - Use `routing.quick_reference` if the task nature is identifiable (e.g., `test_generation` → the configured QA model).
 - If the resolved model is a non-Claude model (anything not haiku/sonnet/opus), **automatically switch to prep mode** and tell the user why — non-Claude models can't be invoked from the Agent tool and need the exported prompt file. Include the resolved model name in the prep-mode output so the user knows which model to target.
@@ -193,7 +202,7 @@ Write the prompt to `<project-root>/task-X.X-prompt.md` with these sections, in 
 Then tell the user:
 
 - The absolute path to the prompt file (via a `computer://` link if in Cowork).
-- The tier and recommended model. If `hermes-model-config.json` was loaded, name the specific model from the config (e.g., "capable tier → glm-5.1 per hermes-model-config.json"). Otherwise, suggest fitting external models (e.g., "capable tier → GLM-4, Sonnet, Qwen-Coder-32B, Codex"). If the user specified a model override, use that instead.
+- The tier and recommended model. If `model-config.json` was loaded, name the specific model from the config (e.g., "capable tier → glm-5.1 per model-config.json"). Otherwise, suggest fitting external models (e.g., "capable tier → GLM-4, Sonnet, Qwen-Coder-32B, Codex"). If the user specified a model override, use that instead.
 - Reminder: "Paste this into your model. When it returns modified files, drop them back in the project and tell me — I'll verify against the acceptance criteria and mark the task ✅."
 
 Do **not** mark the task ✅ yet in prep mode — wait for the user to confirm the external run succeeded.
@@ -542,7 +551,7 @@ DEPLOYMENT SAFETY RULES:
 ## Edge cases
 
 - **Plan missing Task Dependency Graph:** parse task headings for ✅ markers instead. Warn the user that without a graph you can't reason about cross-phase deps.
-- **Task missing Tier/model:** default to `capable`. Resolve the model from `hermes-model-config.json` (if loaded) using `plan_tier_mapping.tier_worker`, otherwise default to Sonnet. Note this in the preview.
+- **Task missing Tier/model:** default to `capable`. Resolve the model from `model-config.json` (if loaded) using `plan_tier_mapping.tier_worker`, otherwise default to Sonnet. Note this in the preview.
 - **Task missing Acceptance criteria:** refuse to dispatch. Tell the user the plan is under-specified for this task and suggest using `create-plan` to patch it.
 - **All tasks ✅:** mark the plan as `"completed"` in `plans/PLANS_REGISTRY.json`, congratulate the user; mention any "Optional / Future" or Phase N+ sections that exist but weren't in scope.
 - **User asks to run multiple tasks in parallel:** dispatch multiple sub-agents in one message, one per task, but only if the tasks have no overlapping file writes. Otherwise serialize and explain why.

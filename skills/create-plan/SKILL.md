@@ -68,20 +68,29 @@ This skill was forged from real-world lessons. A project (ike-saas) ran 97 commi
 
 #### 0a. Load model routing config
 
-Check the project root (and the workspace folder) for `hermes-model-config.json` and/or `hermes-agent-model-strategy-guide.md`.
+Search for `model-config.json` and `model-strategy-guide.md` using the following lookup hierarchy (check all locations, first file found at the highest-priority location wins):
 
-**If `hermes-model-config.json` exists:**
+1. **Agent base data directory** (lowest priority) — e.g., `/opt/data/` for a Hermes agent, or whatever the agent's configured data root is. This is the org-wide / agent-wide default.
+2. **Project root** — the root of the current project/repo.
+3. **Workspace folder** — the active workspace directory within the project (if different from project root).
+4. **User provided** (highest priority) — if the user explicitly provides a config file path or passes overrides in the conversation, that takes precedence over all discovered files.
+
+Check each location in order. If a `model-config.json` is found at multiple locations, use the one from the highest-priority location (user provided > workspace > project root > agent data directory). The same lookup applies to `model-strategy-guide.md`.
+
+> **Backwards compatibility:** If no `model-config.json` is found but a legacy `hermes-model-config.json` exists at any of the above locations, use it as a fallback. Same for `hermes-agent-model-strategy-guide.md` → `model-strategy-guide.md`. Log a note to the user suggesting they rename to the generic names.
+
+**If `model-config.json` exists:**
 - Read it. This is the single source of truth for model routing in this project.
 - Use its `plan_tier_mapping` section to resolve tier labels to concrete models when writing the "Suggested model" field for each task. The mapping keys are: `tier_frontier`, `tier_strong`, `tier_worker`, `tier_fast`, `tier_cheap`, `tier_utility`.
 - Use its `routing.roles` and `routing.quick_reference` sections to pick the best model for each task based on task nature (backend code, frontend build, architecture, QA, infra, DevOps, etc.) rather than just tier.
-- Also read `hermes-agent-model-strategy-guide.md` if it exists — it contains deeper rationale on model strengths, budget constraints, and usage patterns. The JSON config is the machine-readable source of truth; the strategy guide is the human-readable explanation.
-- Reference `hermes-model-config.json` in the plan's **Context Files** section so `plan-runner` can use it at dispatch time.
+- Also read `model-strategy-guide.md` if it exists (same lookup hierarchy) — it contains deeper rationale on model strengths, budget constraints, and usage patterns. The JSON config is the machine-readable source of truth; the strategy guide is the human-readable explanation.
+- Reference `model-config.json` in the plan's **Context Files** section (with its resolved path) so `plan-runner` can use it at dispatch time.
 
 **If no model config exists:**
 - Fall back to the generic tier→model examples in this skill (see tier table in Section 5).
-- Mention to the user that creating a `hermes-model-config.json` would improve model routing precision across plans.
+- Mention to the user that creating a `model-config.json` (via the `model-strategy` skill) would improve model routing precision across plans.
 
-**User overrides always win.** If the user explicitly names a model for a task, role, or the entire plan during intake (e.g., "use Kimi for all architecture tasks", "run everything on Sonnet", "use GLM-5.1 for task 2.3"), that override takes precedence over the config file. Document any overrides in the plan's Agentic Architecture Configuration section so `plan-runner` respects them too.
+**User overrides always win.** If the user explicitly names a model for a task, role, or the entire plan during intake (e.g., "use Kimi for all architecture tasks", "run everything on Sonnet", "use GLM-5.1 for task 2.3"), that override takes precedence over any config file at any location. Document any overrides in the plan's Agentic Architecture Configuration section so `plan-runner` respects them too.
 
 #### 0b. Load app-spec
 
@@ -131,7 +140,7 @@ Ask ALL of these. Don't assume.
 - **Platform:** Is the agent running on Hermes, OpenClaw, Claude Code, Cursor, or something else? This affects available tools, context limits, and session behavior.
 - **Session limits:** Does the agent have context window limits or session timeouts? If yes, tasks must be sized to complete well within those limits.
 - **Is this a new project or work on an existing codebase?** (Determines whether to include the bootstrap phase.)
-- **Model overrides:** Do you want to override any of the default model assignments from `hermes-model-config.json`? (e.g., "always use GLM-5.1 for everything", "use Kimi K2.6 for architecture tasks instead of the config default"). If no config exists, ask which models/tiers the user prefers.
+- **Model overrides:** Do you want to override any of the default model assignments from `model-config.json`? (e.g., "always use GLM-5.1 for everything", "use Kimi K2.6 for architecture tasks instead of the config default"). If no config exists, ask which models/tiers the user prefers.
 
 **Group D — Context Files & Testing**
 
@@ -307,7 +316,7 @@ Each task block must contain, in this order:
    - Commit with conventional format: `{feat|fix|test}({scope}): {description}`
 
 **Tier:** cheap | capable
-**Suggested model:** {resolve from hermes-model-config.json if available, else e.g., "Sonnet, GLM-5.1" or "Haiku, Qwen-Coder-7B"}
+**Suggested model:** {resolve from model-config.json if available, else e.g., "Sonnet, GLM-5.1" or "Haiku, Qwen-Coder-7B"}
 
 **Acceptance criteria:**
 1. Test file exists at {path} with test titled "{title}"
@@ -319,7 +328,7 @@ Each task block must contain, in this order:
 
 **Calibration — tier → task complexity:**
 
-If `hermes-model-config.json` was loaded in Step 0a, use its `plan_tier_mapping` to fill the "Suggested model" field. The config maps tiers like `tier_cheap`, `tier_worker`, `tier_strong`, etc. to concrete models. Use the `routing.quick_reference` to further refine — e.g., a "capable" frontend task maps to the `react_nextjs_build` entry, not just the generic `tier_worker`.
+If `model-config.json` was loaded in Step 0a, use its `plan_tier_mapping` to fill the "Suggested model" field. The config maps tiers like `tier_cheap`, `tier_worker`, `tier_strong`, etc. to concrete models. Use the `routing.quick_reference` to further refine — e.g., a "capable" frontend task maps to the `react_nextjs_build` entry, not just the generic `tier_worker`.
 
 If no model config exists, fall back to these generic defaults:
 
