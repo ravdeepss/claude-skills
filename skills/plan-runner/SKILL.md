@@ -159,6 +159,8 @@ Report format:
 
 ### 6a. Run mode — dispatch to a Claude sub-agent
 
+**Hermes-specific delegation:** When dispatching via Hermes `delegate_task`, read `references/hermes-subagent-dispatch.md` for the full config guide — model name verification, timeout management, and common subagent pitfalls (wrong model = silent fallback, config restart requirement, ignored screenshot lists).
+
 Map the task's **Tier** to a Claude model:
 
 **Default tier→model mapping** (used when no `model-config.json` is loaded and no model override applies):
@@ -172,11 +174,11 @@ Map the task's **Tier** to a Claude model:
 **If `model-config.json` was loaded in step 1b**, resolve the model from the config instead:
 - Use `plan_tier_mapping` for tier-based resolution (e.g., `tier_cheap` might map to `gemma-4-31b`, `tier_worker` to `glm-5.1`).
 - Use `routing.quick_reference` if the task nature is identifiable (e.g., `test_generation` → the configured QA model).
-- If the resolved model is a non-Claude model (anything not haiku/sonnet/opus), **automatically switch to prep mode** and tell the user why — non-Claude models can't be invoked from the Agent tool and need the exported prompt file. Include the resolved model name in the prep-mode output so the user knows which model to target.
+- If the resolved model is a non-Claude model (anything not haiku/sonnet/opus): **on Claude Code, switch to prep mode** — non-Claude models can't be invoked from the Agent tool there. **On Hermes, dispatch directly via `delegate_task`** — Hermes supports all OpenAI-compatible models (GLM-5.1, DeepSeek, Kimi, Gemma) as subagents. Always read `references/hermes-subagent-dispatch.md` for Hermes-specific config (provider, model ID verification, timeout management). Include the resolved model name in the preview so the user knows which model was chosen.
 
-**User overrides:** If the user explicitly names a model in the current conversation ("use Sonnet for this one", "dispatch to GLM-5.1"), respect that. For Claude models (haiku/sonnet/opus), dispatch directly. For non-Claude models, switch to prep mode with the specified model noted.
+**User overrides:** If the user explicitly names a model in the current conversation ("use Sonnet for this one", "dispatch to GLM-5.1"), respect that. Dispatch directly on Hermes (all OpenAI-compatible models supported via `delegate_task`). On Claude Code, non-Claude models require prep mode — export a prompt file the user can paste into the target model.
 
-If the task names a non-Claude suggested model (Qwen, Gemma, GLM, Codex, Gemini, …) — whether from the config or the plan — **do not try to dispatch** — automatically switch to prep mode and tell the user why. Non-Claude models can't be invoked from the Agent tool; they need the copy-paste prompt.
+If the task names a non-Claude suggested model (Qwen, Gemma, GLM, Codex, Gemini, …) — whether from the config or the plan — **on Hermes, dispatch directly** (all are supported). On Claude Code, switch to prep mode and export a prompt file.
 
 Call the Agent tool:
 
@@ -392,12 +394,129 @@ After a run-mode agent returns, after the user confirms a prep-mode external run
 
 1. Summarise what was done, which acceptance criteria passed/failed, any warnings.
 2. If **all** acceptance criteria passed:
-   - Edit the plan file: append ` ✅` to the task's entry in the Task Dependency Graph (and in the task heading if the plan uses that convention).
-   - Update `plans/{NAME}_PROGRESS.json` with the task completion.
-   - Update `plans/PLANS_REGISTRY.json`: increment `completed_tasks`, update `last_updated`, `last_agent`, and `current_phase`.
+   - **Hermes-specific:** Subagents work on local clones — files are NOT pushed to GitHub automatically. After verifying the subagent's output, push all changed files to the feature branch via `mcp_github_push_files`. Read `references/hermes-subagent-dispatch.md` for the full post-subagent checklist.
+   - **Per-task:** Mark the task as **code-complete** in PROGRESS.json with `"status": "code-complete"` and the commit SHA. Do NOT mark it `"complete"` and do NOT append ✅ in the Task Dependency Graph yet. Code-complete means the feature branch has the code and tests pass — but it hasn't been reviewed or merged.
+   - **Do NOT create a PR yet.** PRs are created in batch at the end of the phase (see Phase PR Review Gate below). Creating per-task PRs floods the repository with tiny diffs and burns review cycles. The only exception is when the plan explicitly states per-task PRs, or when the task spans multiple repos that need cross-coordination.
+   - Commit and push PROGRESS.json to the feature branch after each task update so progress is durable.
 3. If any criterion failed, leave the task unmarked, show the failures, and offer: retry with added context, open a debug session, or skip (not recommended — later tasks may depend on it).
 4. If this was a **deploy task** and acceptance criteria failed post-deploy, trigger the **Rollback Strategy** below before offering retry.
 5. Announce the next available task (do not auto-run unless the user asked for a streak).
+6. **Cron nudge setup:** When kicking off a long-running plan, offer to set up a recurring cron job that auto-nudges the plan forward. Use `cronjob` with action=create, the plan-runner skill, and a schedule like `every 2h`. Include the repo name, plan file name, and model routing config path in the prompt. Circuit breaker: if the same task fails 2x, the cron should stop and wait for human review.
+
+---
+
+## Phase PR Review Gate (MANDATORY at end of every phase)
+
+**When:** After ALL tasks in a phase are code-complete (pushed to feature branches with passing tests), but BEFORE the phase verification gate (Task N.V) is run and BEFORE the phase is marked complete.
+
+**DO NOT SKIP THIS GATE.** A phase where code sits unmerged on feature branches while PROGRESS.json says "complete" is a lie. Future sessions will waste time discovering unmerged work, chasing phantom regressions, or building on code that doesn't exist on main.
+
+### Step G1 — Verify all tasks are code-complete
+
+1. Read PROGRESS.json. Confirm every task in the current phase has `"status": "code-complete"` (or `"complete"` if already merged).
+2. If any task is still `"pending"` or `"in_progress"`, do NOT proceed. Complete those tasks first.
+3. List all feature branches used by this phase (`git branch -a | grep feat/`).
+
+### Step G2 — Create batch PRs (one per repo)
+
+For each repo that this phase touched:
+
+1. Identify all feature branches that need merging into `main` (or the plan's target branch).
+2. If multiple feature branches exist for one repo, merge them into a single phase branch first:
+   ```bash
+   git checkout main && git pull origin main
+   git checkout -b feat/phase-{N}
+   git merge feat/{task-branch-1} feat/{task-branch-2} ...
+   git push origin feat/phase-{N}
+   ```
+3. Create ONE pull request per repo using `mcp_github_create_pull_request`:
+   - `head`: `feat/phase-{N}` (or the individual feature branch if only one)
+   - `base`: `main` (or the plan's target branch)
+   - `title`: `"Phase {N}: {phase name}"` — e.g., `"Phase 2: Multi-tenancy"`
+   - `body`: Summarize what this phase delivers, list all tasks, and link to PROGRESS.json
+
+### Step G3 — Wait for CI
+
+For each PR:
+1. Check CI status using `mcp_github_get_pull_request_status`.
+2. If CI fails: read the failure logs, identify the cause, and either:
+   - Fix trivially (missing semicolon, lint error) — commit the fix, push, re-check.
+   - Assign a fixer subagent if the fix is non-trivial. Use the same model that wrote the failing code.
+   - Do NOT mark the phase complete with failing CI.
+3. If CI passes: proceed to review.
+
+### Step G4 — Assign reviewer subagent
+
+For each PR, dispatch a review subagent with the `github-code-review` skill:
+
+```yaml
+Model routing for reviews:
+  First pass:  gemma-4-31b (cheap, catches 80% of issues — linting, security patterns, obvious bugs)
+  Escalation:  deepseek-v4-pro (when gemma flags something complex, or for architecture-sensitive code)
+```
+
+**Reviewer prompt must include:**
+- The PR number, repo, and diff summary
+- The phase's Architecture Decisions from the plan (the reviewer MUST enforce these)
+- A directive: "Review this PR for: (1) correctness against the acceptance criteria in the plan, (2) security issues (injection, exposed secrets, missing auth), (3) adherence to architecture decisions, (4) test coverage for new code. Use `mcp_github_create_pull_request_review` with event=APPROVE if clean, or REQUEST_CHANGES with inline comments if issues found."
+
+### Step G5 — Review → Fix Loop
+
+```
+┌─────────────────────────────────────────────┐
+│                                             │
+│  Review returned?                           │
+│   ├─ APPROVE → Merge PR (Step G6)           │
+│   └─ REQUEST_CHANGES →                      │
+│       ├─ Orchestrator reads review comments │
+│       ├─ Assign fixer subagent              │
+│       │   (model = original task's model)   │
+│       ├─ Fixer pushes changes to PR branch  │
+│       ├─ CI re-checked                      │
+│       ├─ Re-assign reviewer                 │
+│       └─ Loop until APPROVE or circuit break│
+│                                             │
+└─────────────────────────────────────────────┘
+```
+
+**Fixer subagent context:** Provide the review comments, the PR diff, and the task's original specification. The fixer should address each inline comment and push to the PR branch.
+
+**Circuit breaker:** If the same category of issue is flagged 3+ times across review cycles, or 3 full review→fix→review cycles pass without resolution, **STOP and escalate to the user.** Do not let two AIs argue in circles. Report:
+- The PR link
+- The repeating issue category
+- The review comments from the last cycle
+- Recommendation for human intervention
+
+### Step G6 — Squash-merge PR
+
+Once all PRs for the phase are approved:
+1. Squash-merge each PR using `mcp_github_merge_pull_request` with `merge_method: "squash"`.
+2. Pull main locally: `git checkout main && git pull origin main`.
+3. Clean up: delete the phase branch locally and on remote.
+
+### Step G7 — Update PROGRESS.json and plan
+
+Only NOW — after all PRs are merged to main — do the final marking:
+1. Edit the plan file: append ` ✅` to every task in the phase's Task Dependency Graph entry.
+2. Update PROGRESS.json: set all phase tasks to `"complete"`, set `"current_phase"` to the next phase number.
+3. Commit and push BOTH files directly to main:
+   ```bash
+   git add PROGRESS.json plans/{NAME}_PLAN.md
+   git commit -m "docs: complete Phase {N} — all PRs merged"
+   git push origin main
+   ```
+4. If `plans/PLANS_REGISTRY.json` exists: increment `completed_tasks`, update `last_updated`, `last_agent`, and `current_phase`.
+
+### Step G8 — Run Phase Verification Gate
+
+Now run the phase verification gate task (N.V) against the **merged main branch** — not against feature branches. This gate proves the merged code works end-to-end.
+
+1. Checkout main: `git checkout main && git pull origin main`
+2. Run the verification commands from the Task N.V block in the plan
+3. If verification passes: the phase is truly complete. Announce the next phase.
+4. If verification fails: escalate to fixer subagent, loop until green (same circuit breaker rules apply).
+
+**Phase is NOT complete until G1–G8 all pass.** Do NOT announce "Phase N complete" or dispatch tasks from Phase N+1 until every PR is merged and the verification gate passes on main.
 
 ## 8. Post-plan completion
 
@@ -519,11 +638,27 @@ DEPLOYMENT SAFETY RULES:
 
 ---
 
+## Updating plan files on GitHub
+
+Plan files are often 50–100KB+. The `mcp_github_create_or_update_file` tool requires inlining the full file content as a function parameter — for files over ~50KB, this frequently truncates. **Prefer the terminal+git approach for plan file updates:**
+
+```bash
+cd /opt/data/<repo> && git pull origin main && \
+  cp /tmp/<updated-plan>.md plans/<PLAN>.md && \
+  git add plans/<PLAN>.md && git commit -m "docs: mark task X.X ✅" && \
+  git push origin main
+```
+
+This avoids the content-inlining size limit entirely. Use the local clone (created by subagent dispatch or `git pull`) rather than re-cloning each time.
+
+For files under ~30KB, `mcp_github_push_files` or `mcp_github_create_or_update_file` are fine. If a push returns a 200 but the file size drops dramatically (e.g., 46KB → 6KB), content was truncated — revert and use terminal+git instead.
+
 ## Handling failures (run mode)
 
 - **Agent says criteria failed:** do NOT mark ✅. Surface the failure, collect what went wrong, and offer to re-run with that as added context.
 - **Agent edited files outside the task's scope:** flag this to the user — the worker broke rule 3 of the preamble. Let the user decide whether to keep the extra changes.
 - **Build/test command fails:** treat as a failed criterion.
+- **Vision-dependent task but model lacks vision:** See `references/ocr-extraction-pipeline.md` for the easyocr-based fallback pipeline. This converts image extraction into a text-parsing problem when the subagent model can't process images.
 
 ---
 
@@ -548,8 +683,86 @@ DEPLOYMENT SAFETY RULES:
 
 ---
 
+## pnpm Monorepo Execution Pitfalls
+
+When executing plan tasks in a pnpm workspace monorepo, watch for these gotchas:
+
+### Stub scripts (`echo ok`)
+
+Phase 0 scaffolding typically creates placeholder scripts: `"test": "echo ok"`, `"build": "echo ok"`, etc. These make the root-level `pnpm test` pass but silently do nothing. **Before running TDD, check the target package's `package.json`** — if scripts are stubs, replace them with real commands (e.g., `"test": "vitest run"`, `"typecheck": "tsc --noEmit"`) and add the required devDependencies. Otherwise the RED step (test should fail) passes vacuously and you get a false positive.
+
+### Missing generated files
+
+Plans often reference files "created by Task X.X" (e.g., `db-types.ts` generated from Supabase). If the file doesn't exist at runtime — even though the plan says it was created — **create a minimal stub** so barrel exports compile. This happens when:
+- A prior task claimed to create the file but didn't commit it
+- The file is generated externally (Supabase MCP) and the generation wasn't run
+- The session died before committing
+
+Use the smallest valid stub (e.g., `export type Database = {}` for db-types). Flag it in the report and PROGRESS.json learnings so the next session knows to regenerate it.
+
+### Adding devDependencies
+
+When a task requires adding a devDependency (e.g., vitest), edit `package.json` and then **always run `pnpm install`** before running tests. The dep isn't available until pnpm resolves it into `node_modules/`. Forgetting this causes confusing "module not found" errors that look like import path issues but are actually missing packages.
+
+### Concurrent agent pushes (multi-agent repos)
+
+When multiple agents or cron jobs work on the same repo in parallel, the remote accumulates commits between your `git pull` and `git push`. This causes rejected pushes: `"Updates were rejected because the remote contains work that you do not have locally."`
+
+**Rule: ALWAYS `git pull --rebase origin main` immediately before every `git push`.** No exceptions — even if you just pulled 5 minutes ago. Another cron job or agent may have pushed in the interim.
+
+```bash
+# Safe push pattern for multi-agent repos:
+git pull --rebase origin main && git push origin main
+```
+
+If rebase produces conflicts:
+1. Read the conflict markers — usually PROGRESS.json or plan dependency graph
+2. Accept the upstream version (it has the latest state from other agents)
+3. Re-apply your changes on top
+4. Push again
+
+**Stash unrelated changes** before pulling to avoid mixing work from different tasks:
+```bash
+git stash push -m "task X.X changes"
+git pull --rebase origin main
+git stash pop
+```
+
+### `write_file` linter false positives with tsconfig extends
+
+The `write_file` tool has a built-in TypeScript linter that **does not resolve `extends` chains** in `tsconfig.json`. In a monorepo where child tsconfigs use `"extends": "../../tsconfig.base.json"`, the linter applies only the local tsconfig fields — missing `lib`, `moduleResolution`, and other inherited options. This produces false errors like:
+
+### Orchestrator environment pnpm version incompatibility
+
+The orchestrator's Node.js version may not support the pnpm version locked in the project's `pnpm-lock.yaml`. For example, Node.js v20 can't run pnpm ≥ 10 (requires `node:sqlite` built-in module added in v22). Running `pnpm install` fails with `ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite`.
+
+**Workaround:** Use `npx` with the exact pnpm version the lockfile was built with:
+```bash
+npx --yes pnpm@10.33.2 install --frozen-lockfile
+npx --yes pnpm@10.33.2 --filter @fitlog/mcp-server test
+```
+
+`npx` downloads and runs the correct pnpm binary regardless of the system Node.js version — pnpm bundles its own Node.js. Do not globally `npm install -g pnpm` — npm may resolve the version tag incorrectly (e.g., `pnpm@8` resolves to pnpm 10.x because npm treats the version prefix as a semver range).
+
+```
+error TS2583: Cannot find name 'Map'. Do you need to change your target library?
+error TS2705: An async function or method in ES5 requires the 'Promise' constructor.
+error TS2307: Cannot find module 'rollup/parseAst' (from third-party node_modules)
+```
+
+**How to handle:**
+1. **Trust `tsc --noEmit` over the write_file linter.** Always verify with the actual TypeScript compiler via terminal.
+2. **Ignore write_file lint errors** that reference `ES5`, `Map`, `Set`, `Promise`, or `rollup/parseAst` — these are almost always false positives from missing base config.
+3. **Real errors still surface** via `tsc --noEmit` and `vitest run`. If those pass, the write_file linter was wrong.
+4. **Pre-existing errors in the same_tool_failure_warning loop** (count=3+) are a signal that the linter is stuck, not that your code is broken. Continue writing files and verify at the end with `tsc`.
+
+This is especially common with Hono, Zod, and other libraries that use modern TS features in their type declarations.
+
+---
+
 ## Edge cases
 
+- **PROGRESS.json says complete but code isn't deployed/merged:** In multi-repo projects or when tasks span multiple sessions, PROGRESS.json can become stale — claiming a task is ✅ when the PR was never created or merged. ALWAYS verify by checking: (a) is the commit on the target branch? (b) does the remote have it? (c) was a PR actually merged? If PROGRESS.json is out of sync, fix it and push the correction. Trust git history over PROGRESS.json.
 - **Plan missing Task Dependency Graph:** parse task headings for ✅ markers instead. Warn the user that without a graph you can't reason about cross-phase deps.
 - **Task missing Tier/model:** default to `capable`. Resolve the model from `model-config.json` (if loaded) using `plan_tier_mapping.tier_worker`, otherwise default to Sonnet. Note this in the preview.
 - **Task missing Acceptance criteria:** refuse to dispatch. Tell the user the plan is under-specified for this task and suggest using `create-plan` to patch it.

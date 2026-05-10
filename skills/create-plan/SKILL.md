@@ -343,7 +343,7 @@ There is no `heavy` tier. If a task needs heavy reasoning, resolve the hard thin
 
 ### 6. Phase-end verification gate
 
-At the end of every feature phase, add a verification task:
+At the end of every feature phase, add a verification task. **IMPORTANT:** This verification gate runs AFTER the Phase PR Review Gate (all PRs merged to main). DO NOT run it against feature branches — it proves the merged code works end-to-end on main.
 
 ```
 ### Task N.LAST — Phase N verification gate
@@ -461,9 +461,11 @@ You are a plan executor. Your job is to pick up where the last session left off 
 5. Otherwise, identify the next pending task from the Task Dependency Graph in `plans/{NAME}_PLAN.md`. Verify all its dependencies are marked complete in PROGRESS.json.
 6. Read the plan's Worker Instructions section — follow them exactly, including the Quality Ritual.
 7. Execute the task. Follow TDD steps. Run the build gate. Self-verify. Commit.
-8. Update `plans/{NAME}_PROGRESS.json` and `plans/PLANS_REGISTRY.json` (increment completed_tasks).
-9. If this was a QA gate task and it passed, check if the next phase has tasks ready. If yes AND you have remaining context budget, execute the next task. If not, stop cleanly.
-10. If you hit a provider error, rate limit, or context limit: commit work, update PROGRESS.json with notes, and stop. The next scheduled run will pick up.
+8. Push the commit to the feature branch: `git push origin {branch}`.
+9. Update `plans/{NAME}_PROGRESS.json` with `\"status\": \"code-complete\"` for this task (NOT `\"complete\"` — tasks are only marked complete after PR review and merge). Then commit and push it.
+10. If this was the LAST task in the current phase, invoke the **Phase PR Review Gate** from the `plan-runner` skill — create batch PRs per repo, assign reviewer subagent, run review→fix loop, squash-merge, THEN mark tasks complete and run the phase verification gate. Do NOT skip this gate.
+11. If this was a QA gate task and it passed, check if the next phase has tasks ready. If yes AND you have remaining context budget, execute the next task. If not, stop cleanly.
+12. If you hit a provider error, rate limit, or context limit: commit work, update PROGRESS.json with notes, and stop. The next scheduled run will pick up.
 
 ## Circuit breaker
 
