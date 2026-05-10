@@ -64,7 +64,8 @@ This section tells `plan-runner` how to dispatch tasks.
   "last_agent": null,
   "last_updated": "",
   "notes": "",
-  "learnings": []
+  "learnings": [],
+  "task_models": {}
 }
 ```
 
@@ -136,8 +137,9 @@ This is the heartbeat of the plan. Every task that produces code follows this ri
   - Save as a comment in the code, a note in PROGRESS.json `"notes"` field, or a memory entry.
   - Do NOT defer this to "later" — learnings not saved immediately are lost when the session dies.
 
-**Step 7 — Update progress:**
-  - Update `plans/{NAME}_PROGRESS.json` with the completed task status and timestamp.
+**Step 7 — Update progress and record model:**
+  - Update `plans/{NAME}_PROGRESS.json` with the completed task status, timestamp, and the model you used.
+  - Add an entry to `task_models`: `"X.Y": "model-name"` (e.g., `"0.1": "glm-4.7"`, `"5.1": "deepseek-v4-pro"`). This enables post-hoc auditing of whether the plan's `**Suggested model:**` was respected.
   - Update `plans/PLANS_REGISTRY.json` (increment `completed_tasks`, update `last_updated`).
   - If this is the last task in a phase, set the phase status to `"completed"`.
 
