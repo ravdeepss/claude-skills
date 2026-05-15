@@ -52,16 +52,7 @@ Never hardcode a specific filename — one project's plan is `DASHBOARD_PLAN.md`
 
 ### 1b. Load model routing config
 
-After finding the plan file, search for `model-config.json` using the following lookup hierarchy (check all locations, first file found at the highest-priority location wins):
-
-1. **Agent base data directory** (lowest priority) — e.g., `/opt/data/` for a Hermes agent, or whatever the agent's configured data root is. This is the org-wide / agent-wide default.
-2. **Project root** — the root of the current project/repo.
-3. **Workspace folder** — the active workspace directory within the project (if different from project root).
-4. **User provided** (highest priority) — if the user explicitly provides a config file path or passes overrides in the conversation, that takes precedence over all discovered files.
-
-Check each location in order. If `model-config.json` is found at multiple locations, use the one from the highest-priority location.
-
-> **Backwards compatibility:** If no `model-config.json` is found but a legacy `hermes-model-config.json` exists at any of the above locations, use it as a fallback. Log a note to the user suggesting they rename to the generic name.
+After finding the plan file, check the project root (and the workspace folder) for `hermes-model-config.json`.
 
 **If found:**
 - Read it. This overrides the default tier→model mapping in step 6a.
@@ -77,9 +68,29 @@ Check each location in order. If `model-config.json` is found at multiple locati
 **Override priority (highest to lowest):**
 1. User explicitly says "use X model for this task" in the current conversation
 2. Plan's Agentic Architecture Configuration section lists model overrides
-3. Task's "Suggested model" field in the plan
-4. `model-config.json` routing (by task nature, then by tier)
-5. Default tier→model mapping (cheap→haiku, capable→sonnet, heavy→opus)
+3. **Task's "Suggested model" field in the plan — THIS IS THE PLAN AUTHOR'S INTENT. Use it directly. Do NOT resolve through tier mapping.**
+4. `hermes-model-config.json` routing (by task nature, then by tier) — only when the task has no explicit Suggested model
+5. Default tier→model mapping (cheap→haiku, capable→sonnet, heavy→opus) — only as last resort
+
+**⚠️ Silent routing bug:** If a task has both `**Tier:** cheap` and `**Suggested model:** GLM 4.7`, resolving by tier (`tier_cheap` → gemma-4-31b per HERMES.md) silently overrides the plan author's explicit model choice. The plan author may use tiers that don't match HERMES.md's tier names (e.g., `capable` has no HERMES.md equivalent). ALWAYS check for `Suggested model` first — it IS the resolution.
+
+### 1c. Crash recovery — check dispatch log
+
+**Before dispatching any task, check whether the previous session crashed.** Read `plans/{NAME}_DISPATCH_LOG.jsonl` if it exists:
+
+1. Read the last 5 lines of the dispatch log.
+2. If the last line is `"action":"dispatched"` with no matching `"action":"completed"` or `"action":"failed"` for the same task:
+   → **CRASH DETECTED.** The orchestrator died after dispatching but before recording the result.
+3. Run **GitHub-first recovery** (see Dispatch Log & Crash Recovery section):
+   - `git fetch origin && git log origin/main --since="<dispatched_at>" --oneline`
+   - Grep commit messages for the task scope (conventional commit prefix, feature keyword)
+   - If commit found → subagent completed, mark task code-complete, write `"action":"recovered"` to log
+   - If no commit AND `dispatched_at` > 15 min ago → subagent timed out, write `"action":"re-dispatched"` to log, dispatch fresh
+   - If no commit AND `dispatched_at` < 15 min ago → subagent may still be running, wait (or check running processes)
+4. If the last line is `"action":"session_ended"` → clean resume, no recovery needed.
+5. If the log doesn't exist → first run of this plan, no recovery needed.
+
+**Always write `"action":"session_started"`** to the dispatch log at the beginning of every session.
 
 ### 2. Determine the next task
 
@@ -108,7 +119,7 @@ Before dispatching, show:
 
 - **Plan:** filename
 - **Task:** number and name
-- **Tier / model:** `cheap|capable|heavy` and the resolved model (from user override → plan config → model-config.json → task block → default mapping, in priority order)
+- **Tier / model:** `cheap|capable|heavy` and the resolved model (from user override → plan config → hermes-model-config.json → task block → default mapping, in priority order)
 - **Summary:** one sentence from the Goal
 - **Dependencies:** which ✅ tasks this builds on
 - **Mode:** run, prep, or test
@@ -141,6 +152,10 @@ You are a worker agent executing ONE task from a larger plan. You MUST:
    after your changes and report pass/fail.
 7. When done, explicitly list every acceptance criterion from the task and
    mark each pass / fail with a one-line justification.
+8. Do NOT read, write, or modify `PROGRESS.json`, `DISPATCH_LOG.jsonl`,
+   or the plan file's Task Dependency Graph. The orchestrator owns all
+   state files — report your results in your response and the orchestrator
+   will update state after verifying your work.
 ```
 
 **(b) Task-specific block** — copy the full task section verbatim from the plan, from `### Task X.X` through its acceptance criteria.
@@ -163,7 +178,7 @@ Report format:
 
 Map the task's **Tier** to a Claude model:
 
-**Default tier→model mapping** (used when no `model-config.json` is loaded and no model override applies):
+**Default tier→model mapping** (used when no `hermes-model-config.json` is loaded and no model override applies):
 
 | Tier      | Model       |
 |-----------|-------------|
@@ -171,7 +186,9 @@ Map the task's **Tier** to a Claude model:
 | capable   | `sonnet`    |
 | heavy     | `opus`      |
 
-**If `model-config.json` was loaded in step 1b**, resolve the model from the config instead:
+**If `hermes-model-config.json` was loaded in step 1b**, resolve the model from the config only if the task has NO explicit `**Suggested model:**` field. The plan's explicit model recommendation ALWAYS wins — see Step 1b priority rule #3.
+
+When the config IS the authority (no plan-level model specified):
 - Use `plan_tier_mapping` for tier-based resolution (e.g., `tier_cheap` might map to `gemma-4-31b`, `tier_worker` to `glm-5.1`).
 - Use `routing.quick_reference` if the task nature is identifiable (e.g., `test_generation` → the configured QA model).
 - If the resolved model is a non-Claude model (anything not haiku/sonnet/opus): **on Claude Code, switch to prep mode** — non-Claude models can't be invoked from the Agent tool there. **On Hermes, dispatch directly via `delegate_task`** — Hermes supports all OpenAI-compatible models (GLM-5.1, DeepSeek, Kimi, Gemma) as subagents. Always read `references/hermes-subagent-dispatch.md` for Hermes-specific config (provider, model ID verification, timeout management). Include the resolved model name in the preview so the user knows which model was chosen.
@@ -180,12 +197,34 @@ Map the task's **Tier** to a Claude model:
 
 If the task names a non-Claude suggested model (Qwen, Gemma, GLM, Codex, Gemini, …) — whether from the config or the plan — **on Hermes, dispatch directly** (all are supported). On Claude Code, switch to prep mode and export a prompt file.
 
-Call the Agent tool:
+**Before dispatching**, write a dispatch record to `plans/{NAME}_DISPATCH_LOG.jsonl`:
 
-- **subagent_type:** `general-purpose` (worker needs file tools)
-- **description:** `"Task X.X — <short name>"`
-- **model:** `"haiku"` | `"sonnet"` | `"opus"`
-- **prompt:** the full prompt from step 5
+```jsonl
+{"ts":"<ISO timestamp>","task":"X.X","model":"<resolved model>","action":"dispatched","goal":"<one-line goal from task>"}
+```
+
+Then call delegate_task:
+
+- **goal:** the full prompt from step 5
+- **context:** include the task's Goal, file paths, and architecture decisions
+- **model:** the resolved model from tier/config/override
+- **toolsets:** `['terminal', 'file']` (standard worker toolset)
+
+**After the subagent returns**, write the outcome to the dispatch log:
+
+```jsonl
+{"ts":"<ISO timestamp>","task":"X.X","model":"<model>","action":"completed","commit":"<sha>","ac_total":4,"ac_passed":4}
+```
+
+or on failure:
+
+```jsonl
+{"ts":"<ISO timestamp>","task":"X.X","model":"<model>","action":"failed","error":"<one-line error summary>"}
+```
+
+The dispatch log is **append-only** — never modify existing lines. Atomic appends prevent corruption on crash.
+
+**Push PROGRESS.json immediately** after every state change — never batch. A stale PROGRESS.json is a crash waiting to happen.
 
 Then step 7.
 
@@ -204,7 +243,7 @@ Write the prompt to `<project-root>/task-X.X-prompt.md` with these sections, in 
 Then tell the user:
 
 - The absolute path to the prompt file (via a `computer://` link if in Cowork).
-- The tier and recommended model. If `model-config.json` was loaded, name the specific model from the config (e.g., "capable tier → glm-5.1 per model-config.json"). Otherwise, suggest fitting external models (e.g., "capable tier → GLM-4, Sonnet, Qwen-Coder-32B, Codex"). If the user specified a model override, use that instead.
+- The tier and recommended model. If `hermes-model-config.json` was loaded, name the specific model from the config (e.g., "capable tier → glm-5.1 per hermes-model-config.json"). Otherwise, suggest fitting external models (e.g., "capable tier → GLM-4, Sonnet, Qwen-Coder-32B, Codex"). If the user specified a model override, use that instead.
 - Reminder: "Paste this into your model. When it returns modified files, drop them back in the project and tell me — I'll verify against the acceptance criteria and mark the task ✅."
 
 Do **not** mark the task ✅ yet in prep mode — wait for the user to confirm the external run succeeded.
@@ -388,6 +427,60 @@ Save a copy to `tests/runs/<date>-<scope>.md` (create the folder if absent). Use
 
 ---
 
+## 6d. MANDATORY: Push, Test & Deploy Gate (after EVERY task, before marking complete)
+
+**CRITICAL:** A task is NOT complete just because code was written and committed locally. The plan runner MUST execute ALL THREE stages before marking a task "code-complete":
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Stage 1: PUSH — git push all committed changes           │
+│ Stage 2: TEST — run the full test suite, confirm no     │
+│           regressions (pre-existing failures unchanged)  │
+│ Stage 3: DEPLOY — if the task touches deployed surface   │
+│           (Vercel web, MCP worker, edge functions),      │
+│           deploy and verify the deployment is READY      │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Stage 1 — PUSH (mandatory):**
+```bash
+cd <repo> && git status  # Check for uncommitted changes
+git add -A && git commit -m "feat(scope): task X.X — description"
+git pull --rebase origin main && git push origin main
+```
+Never move past Stage 1 with an unpushed local branch.
+
+**Stage 2 — TEST (mandatory):**
+Run the full test suite. Accept ONLY these failure patterns:
+- Pre-existing failures (documented in the plan's "Known Pre-existing Failures" section, or verified as unchanged from before the task)
+- Flaky tests (random failures, not deterministic)
+
+Any NEW deterministic failure is a BLOCKER. Do not proceed to Stage 3. Investigate and fix, then re-run the suite. Record: `N/M passing (K pre-existing failures)`.
+
+**Stage 3 — DEPLOY (conditional, but REQUIRED when applicable):**
+If the task touches ANY of:
+- `apps/web/` → Vercel auto-deploys on push. Verify deployment went READY with `mcp_vercel_getDeployments`.
+- `apps/mcp-server/` → Deploy with `npx wrangler deploy --name ike-mcp`. Verify with `curl https://ike-mcp.ravdeepss.workers.dev/health`.
+- `supabase/functions/` → Deploy with `npx supabase functions deploy <name> --project-ref <ref>`. Verify logs show no errors.
+- Supabase migrations → Already applied via `mcp_supabase_apply_migration`, but verify with a schema query.
+
+After deploy, run a quick smoke test: load the app, check the health endpoint, or curl the function.
+
+**PITFALL — "Code-complete" without push+deploy:** The cron job completed 12 tasks with commits sitting locally unpushed, the Vercel deployment was stale from a prior commit, and the edge function was never called because the deploy was outdated. PROGRESS.json said "complete" but the feature wasn't live. This is the #1 most damaging pattern in autonomous plan execution.
+
+**Reporting format after Stage 3:**
+```
+Task X.X: <name>
+  Commit: <sha> (pushed to main)
+  Tests: N/M passing (K pre-existing unchanged)
+  Deploy: Vercel READY / MCP worker deployed / Edge function deployed / N/A
+  Smoke test: <result>
+```
+
+Only after ALL three stages pass, proceed to mark the task code-complete in PROGRESS.json.
+
+---
+
 ## 7. Report and update (all modes)
 
 After a run-mode agent returns, after the user confirms a prep-mode external run completed, or after test mode finishes:
@@ -395,7 +488,9 @@ After a run-mode agent returns, after the user confirms a prep-mode external run
 1. Summarise what was done, which acceptance criteria passed/failed, any warnings.
 2. If **all** acceptance criteria passed:
    - **Hermes-specific:** Subagents work on local clones — files are NOT pushed to GitHub automatically. After verifying the subagent's output, push all changed files to the feature branch via `mcp_github_push_files`. Read `references/hermes-subagent-dispatch.md` for the full post-subagent checklist.
-   - **Per-task:** Mark the task as **code-complete** in PROGRESS.json with `"status": "code-complete"` and the commit SHA. Do NOT mark it `"complete"` and do NOT append ✅ in the Task Dependency Graph yet. Code-complete means the feature branch has the code and tests pass — but it hasn't been reviewed or merged.
+   - **Per-task:** Mark the task as **code-complete** in PROGRESS.json with `"status": "code-complete"` and the commit SHA. 
+   - **Record the model used** in `task_models`: `"task_models": { "X.Y": "model-name" }` (e.g., `"0.1": "glm-4.7"`, `"5.1": "deepseek-v4-pro"`). This enables post-hoc auditing of whether the plan's `**Suggested model:**` was actually respected. If the PROGRESS.json doesn't have a `task_models` key yet, create it.
+   - Do NOT mark it `"complete"` and do NOT append ✅ in the Task Dependency Graph yet. Code-complete means the feature branch has the code and tests pass — but it hasn't been reviewed or merged.
    - **Do NOT create a PR yet.** PRs are created in batch at the end of the phase (see Phase PR Review Gate below). Creating per-task PRs floods the repository with tiny diffs and burns review cycles. The only exception is when the plan explicitly states per-task PRs, or when the task spans multiple repos that need cross-coordination.
    - Commit and push PROGRESS.json to the feature branch after each task update so progress is durable.
 3. If any criterion failed, leave the task unmarked, show the failures, and offer: retry with added context, open a debug session, or skip (not recommended — later tasks may depend on it).
@@ -659,6 +754,99 @@ For files under ~30KB, `mcp_github_push_files` or `mcp_github_create_or_update_f
 - **Agent edited files outside the task's scope:** flag this to the user — the worker broke rule 3 of the preamble. Let the user decide whether to keep the extra changes.
 - **Build/test command fails:** treat as a failed criterion.
 - **Vision-dependent task but model lacks vision:** See `references/ocr-extraction-pipeline.md` for the easyocr-based fallback pipeline. This converts image extraction into a text-parsing problem when the subagent model can't process images.
+- **Subagent timeout (no response after 600s):** Check the dispatch log for the task's `dispatched_at` timestamp. Run GitHub-first recovery: `git fetch && git log origin/main --since="<dispatched_at>" --oneline`. If commits matching the task scope exist, the subagent completed — mark recovered. If no commits found after >15 min, re-dispatch. See Dispatch Log & Crash Recovery section for full procedure.
+
+---
+
+## Dispatch Log & Crash Recovery
+
+The dispatch log (`plans/{NAME}_DISPATCH_LOG.jsonl`) is the event-sourced source of truth for every action taken by the orchestrator. PROGRESS.json is a human-readable summary — the dispatch log is the authoritative record.
+
+### Schema (append-only JSONL)
+
+```jsonl
+{"ts":"2026-05-15T05:30:00Z","task":"2.3","model":"deepseek-v4-pro","action":"session_started","agent":"hermes"}
+{"ts":"2026-05-15T05:30:05Z","task":"2.3","model":"deepseek-v4-pro","action":"dispatched","goal":"Add project member invite endpoint"}
+{"ts":"2026-05-15T05:34:12Z","task":"2.3","model":"deepseek-v4-pro","action":"completed","commit":"abc123f","ac_total":4,"ac_passed":4}
+{"ts":"2026-05-15T05:35:00Z","task":"2.4","model":"gemma-4-31b","action":"dispatched","goal":"Wire invite UI to endpoint"}
+{"ts":"2026-05-15T05:35:47Z","task":"2.4","model":"gemma-4-31b","action":"failed","error":"subagent timeout at 600s"}
+{"ts":"2026-05-15T05:36:00Z","task":"2.4","model":"glm-5.1","action":"re-dispatched","goal":"Wire invite UI to endpoint [retry with larger model]"}
+{"ts":"2026-05-15T05:42:00Z","task":"2.4","model":"glm-5.1","action":"completed","commit":"def456g","ac_total":3,"ac_passed":3}
+{"ts":"2026-05-15T05:42:10Z","task":"2.5","model":"deepseek-v4-pro","action":"dispatched","goal":"Add member list endpoint"}
+{"ts":"2026-05-15T05:42:15Z","task":"—","model":"—","action":"session_ended","reason":"clean"}
+```
+
+**Fields by action type:**
+
+| Action | Required fields | Optional fields |
+|--------|----------------|-----------------|
+| `session_started` | `ts`, `agent` | `task` (if resuming mid-task) |
+| `session_ended` | `ts`, `reason` | `tasks_completed` |
+| `dispatched` | `ts`, `task`, `model`, `goal` | — |
+| `completed` | `ts`, `task`, `model`, `commit` | `ac_total`, `ac_passed` |
+| `failed` | `ts`, `task`, `model`, `error` | — |
+| `re-dispatched` | `ts`, `task`, `model`, `goal` | — |
+| `recovered` | `ts`, `task`, `commit` | — |
+
+### When to write each entry
+
+| Action | Exactly when |
+|--------|-------------|
+| `session_started` | First action after finding the plan (step 1) |
+| `dispatched` | Immediately BEFORE calling `delegate_task` (step 6a) |
+| `completed` | After verifying subagent output passes all acceptance criteria + push+test+deploy gate (step 6d) |
+| `failed` | After subagent returns with error, timeout, or failed criteria |
+| `re-dispatched` | When re-dispatching a previously timed-out task |
+| `recovered` | When GitHub recovery finds commits from a task that was `dispatched` but never `completed`/`failed` |
+| `session_ended` | Last action before exiting (clean shutdown) |
+
+### Crash recovery procedure
+
+Run this at the start of EVERY session (step 1c):
+
+```
+1. Read last 5 lines of DISPATCH_LOG.jsonl (tail -5)
+2. If last line is "session_started" with no matching "session_ended":
+   → CRASH DETECTED
+3. Find the most recent "dispatched" entry that has no matching "completed", 
+   "failed", or "recovered" entry for the same task
+4. Run GitHub-first recovery:
+   a. git fetch origin
+   b. git log origin/main --since="<dispatched_at>" --oneline
+   c. grep for conventional commits matching the task scope
+      (e.g., "feat(sharing): add member invite" for task about member invites)
+   d. IF commit found:
+      - Read commit diff, verify against task acceptance criteria
+      - Write "recovered" to dispatch log
+      - Mark task code-complete in PROGRESS.json
+      - Push PROGRESS.json immediately
+   e. IF no commit AND dispatched_at > 15 min ago:
+      - Subagent definitely timed out or crashed
+      - Write "re-dispatched" to dispatch log
+      - Re-dispatch with identical context
+   f. IF no commit AND dispatched_at < 15 min ago:
+      - Subagent may still be running
+      - Wait or check running processes
+      - Only re-dispatch after 20 min staleness
+5. If last line is "session_ended" → clean resume, no recovery needed
+6. If dispatch log doesn't exist → first run, no recovery needed
+
+ALWAYS write "session_started" before dispatching any task.
+```
+
+### Why PROGRESS.json isn't enough for recovery
+
+PROGRESS.json tells you a task is `"in_progress"` but can't tell you:
+- Was a subagent actually dispatched? (no — the orchestrator could have crashed while building the prompt)
+- If dispatched, what model? (need this to know where to look for commits)
+- Did the subagent push code? (PROGRESS.json is local — the commit could be on GitHub)
+- How long ago was it dispatched? (need timestamps for the 15-min staleness heuristic)
+
+The dispatch log answers all four questions. PROGRESS.json remains the human-readable summary; the dispatch log is the authoritative event source.
+
+### Owner rule
+
+Only the orchestrator (plan-runner) writes to PROGRESS.json and DISPATCH_LOG.jsonl. Subagents MUST NOT touch either file (enforced via Worker Instructions rule 8). This eliminates merge conflicts from parallel subagents and ensures state transitions are always sequential and consistent.
 
 ---
 
@@ -764,7 +952,7 @@ This is especially common with Hono, Zod, and other libraries that use modern TS
 
 - **PROGRESS.json says complete but code isn't deployed/merged:** In multi-repo projects or when tasks span multiple sessions, PROGRESS.json can become stale — claiming a task is ✅ when the PR was never created or merged. ALWAYS verify by checking: (a) is the commit on the target branch? (b) does the remote have it? (c) was a PR actually merged? If PROGRESS.json is out of sync, fix it and push the correction. Trust git history over PROGRESS.json.
 - **Plan missing Task Dependency Graph:** parse task headings for ✅ markers instead. Warn the user that without a graph you can't reason about cross-phase deps.
-- **Task missing Tier/model:** default to `capable`. Resolve the model from `model-config.json` (if loaded) using `plan_tier_mapping.tier_worker`, otherwise default to Sonnet. Note this in the preview.
+- **Task missing Tier/model:** default to `capable`. Resolve the model from `hermes-model-config.json` (if loaded) using `plan_tier_mapping.tier_worker`, otherwise default to Sonnet. Note this in the preview.
 - **Task missing Acceptance criteria:** refuse to dispatch. Tell the user the plan is under-specified for this task and suggest using `create-plan` to patch it.
 - **All tasks ✅:** mark the plan as `"completed"` in `plans/PLANS_REGISTRY.json`, congratulate the user; mention any "Optional / Future" or Phase N+ sections that exist but weren't in scope.
 - **User asks to run multiple tasks in parallel:** dispatch multiple sub-agents in one message, one per task, but only if the tasks have no overlapping file writes. Otherwise serialize and explain why.

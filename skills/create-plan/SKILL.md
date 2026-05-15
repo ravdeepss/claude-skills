@@ -332,7 +332,26 @@ If no model config exists, fall back to these generic defaults:
 
 There is no `heavy` tier. If a task needs heavy reasoning, resolve the hard thinking HERE in the plan and leave the worker a mechanical task. The plan author (you) does the thinking; the worker does the typing.
 
-### 6. Phase-end verification gate
+### 5.5. UX Review Pass (for plans with UI tasks)
+
+**After drafting all tasks but before finalizing, run a UX review pass on every UI task.** This prevents the most common plan quality failure: workers implementing exactly what was specified, but the specification omitted critical UX states (empty, loading, error, mobile, accessibility).
+
+For each UI task, ask:
+
+1. **Empty states** — What does the user see when there's no data yet? Specify the exact copy and layout.
+2. **Loading states** — Show skeleton rows, spinners, or placeholders. Never let the UI "pop" from blank to full.
+3. **Error states** — Inline validation errors? Network failure retry? Each error gets a specific UX treatment, not a generic toast.
+4. **Confirmation & safety** — Destructive actions get confirmations. Reversible actions don't. Specify which is which.
+5. **Progressive disclosure** — Is the feature visible too early? Hide advanced UI until the user has data/context to need it. Use one-time tips for discovery.
+6. **Mobile responsiveness** — Specify behavior at ≤768px. Modals become bottom sheets. Touch targets ≥44px. Native selects on mobile.
+7. **Accessibility** — Focus traps for dialogs. `aria-live` regions for dynamic updates. `aria-label` on icon-only buttons. `prefers-reduced-motion` support. Keyboard navigation (Tab, Esc, Enter).
+8. **Transitions & motion** — Specify enter/exit animations with durations. Always gate on `prefers-reduced-motion: no-preference`.
+9. **Visual hierarchy** — Specify sort order of lists. Badge colors. Truncation rules for long text. What's prominent, what's subtle.
+10. **Warmth & delight** — For invite/signup flows especially: contextual welcome banners, post-action micro-steps, subtle pulse animations. New users should feel welcomed, not processed.
+
+**After review:** Expand the task specs with missing UX details. Add concrete copy, layout ASCII diagrams, Tailwind color classes, and specific test cases for each UX state. The smoke test in the phase verification gate MUST include mobile, keyboard, screen reader, motion, and dark mode steps.
+
+**This applies even if the user didn't explicitly ask for a UX review.** A plan without UX specifications produces a feature that "works" but feels broken. The UX review pass is the plan author's responsibility, not the worker's.
 
 At the end of every feature phase, add a verification task. **IMPORTANT:** This verification gate runs AFTER the Phase PR Review Gate (all PRs merged to main). DO NOT run it against feature branches — it proves the merged code works end-to-end on main.
 
@@ -425,6 +444,11 @@ Before saving the plan, walk through every item:
 13. Are conventional commit formats specified in Worker Instructions?
 14. Are explicit "do NOT" instructions included for tasks targeting weaker agents?
 15. Have you emitted the companion `{NAME}_CRON_PROMPT.md` file for auto-scheduled execution?
+16. **Does PLAN_TEMPLATE.md reflect the latest plan-runner conventions?** Check that every step `plan-runner` documents (e.g., recording the model used in `task_models`, Phase PR Review Gate, conventional commits) has a corresponding entry in the template's Worker Instructions section. The template is the worker contract — conventions only in the orchestrator skill are silently ignored by workers. If `plan-runner` was updated, audit PLAN_TEMPLATE.md.
+17. **For plans with UI tasks: have you run the UX Review Pass?** Every UI task specifies empty, loading, error, confirmation, progressive disclosure, mobile, accessibility, motion, visual hierarchy, and warmth states. Smoke tests cover mobile, keyboard, screen reader, motion, and dark mode.
+18. **Are empty states specified with exact copy?** "No members yet" is not enough — give the worker the full sentence, layout, and any supporting icon/illustration.
+19. **Are all destructive actions behind confirmations?** Removing a member, deleting a project — each needs a confirmation dialog with specific copy, not a generic "Are you sure?"
+20. **Is mobile behavior specified for every dialog?** Centered modals become bottom sheets. Touch targets ≥44px. Native selects. Don't leave mobile as an afterthought.
 
 ### 10. Save the plan and update the registry
 
@@ -446,17 +470,23 @@ You are a plan executor. Your job is to pick up where the last session left off 
 ## Instructions
 
 1. Read `plans/PLANS_REGISTRY.json` — if this plan's status is `"completed"`, report "Plan already complete" and stop.
-2. Read `plans/{NAME}_PROGRESS.json`.
-3. If all tasks are complete, report "Plan complete — no remaining tasks" and stop.
-4. If `current_task` is `in_progress`, the previous session died mid-task. Read its notes, assess the state, and either complete or restart the task.
-5. Otherwise, identify the next pending task from the Task Dependency Graph in `plans/{NAME}_PLAN.md`. Verify all its dependencies are marked complete in PROGRESS.json.
-6. Read the plan's Worker Instructions section — follow them exactly, including the Quality Ritual.
-7. Execute the task. Follow TDD steps. Run the build gate. Self-verify. Commit.
-8. Push the commit to the feature branch: `git push origin {branch}`.
-9. Update `plans/{NAME}_PROGRESS.json` with `\"status\": \"code-complete\"` for this task (NOT `\"complete\"` — tasks are only marked complete after PR review and merge). Then commit and push it.
-10. If this was the LAST task in the current phase, invoke the **Phase PR Review Gate** from the `plan-runner` skill — create batch PRs per repo, assign reviewer subagent, run review→fix loop, squash-merge, THEN mark tasks complete and run the phase verification gate. Do NOT skip this gate.
-11. If this was a QA gate task and it passed, check if the next phase has tasks ready. If yes AND you have remaining context budget, execute the next task. If not, stop cleanly.
-12. If you hit a provider error, rate limit, or context limit: commit work, update PROGRESS.json with notes, and stop. The next scheduled run will pick up.
+2. Read `plans/{NAME}_DISPATCH_LOG.jsonl` (last 5 lines). If the last entry is `"action":"dispatched"` with no matching `"completed"`/`"failed"`, the previous session crashed mid-dispatch. Run GitHub-first recovery:
+   - `git fetch && git log origin/main --since="<dispatched_at>" --oneline`
+   - If matching commits exist → mark recovered, update PROGRESS.json, write `"recovered"` to dispatch log
+   - If no commits AND >15 min stale → re-dispatch, write `"re-dispatched"` to log
+3. Read `plans/{NAME}_PROGRESS.json`.
+4. If all tasks are complete, report "Plan complete — no remaining tasks" and stop.
+5. If `current_task` is `in_progress` and the dispatch log shows the subagent completed (commits found on GitHub), update PROGRESS.json to code-complete and continue.
+6. Otherwise, identify the next pending task from the Task Dependency Graph in `plans/{NAME}_PLAN.md`. Verify all its dependencies are marked complete in PROGRESS.json.
+7. Write `"action":"session_started"` to the dispatch log.
+8. Read the plan's Worker Instructions section — follow them exactly, including the Quality Ritual.
+9. Execute the task. Follow TDD steps. Run the build gate. Self-verify. Commit.
+10. Push the commit to the feature branch: `git push origin {branch}`.
+11. Write `"action":"completed"` (or `"failed"`) to the dispatch log with commit SHA and acceptance results.
+12. Update `plans/{NAME}_PROGRESS.json` with `"status": "code-complete"` for this task (NOT `"complete"` — tasks are only marked complete after PR review and merge). Then commit and push it.
+13. If this was the LAST task in the current phase, invoke the **Phase PR Review Gate** from the `plan-runner` skill — create batch PRs per repo, assign reviewer subagent, run review→fix loop, squash-merge, THEN mark tasks complete and run the phase verification gate. Do NOT skip this gate.
+14. If this was a QA gate task and it passed, check if the next phase has tasks ready. If yes AND you have remaining context budget, execute the next task. If not, stop cleanly.
+15. If you hit a provider error, rate limit, or context limit: commit work, write `"session_ended"` to dispatch log, update PROGRESS.json with notes, and stop. The next scheduled run will pick up.
 
 ## Circuit breaker
 
@@ -520,11 +550,25 @@ Every plan has its own progress file at `plans/{NAME}_PROGRESS.json`. Phase 0 in
   "notes": "{any context for the next session}",
   "task_models": {
     "0.1": "{model used, e.g. glm-4.7}"
+  },
+  "dispatch": {
+    "task_id": "0.2",
+    "model": "deepseek-v4-pro",
+    "dispatched_at": "{ISO timestamp}",
+    "status": "dispatched"
   }
 }
 ```
 
-Worker Instructions must include: "After completing each task, update `plans/{NAME}_PROGRESS.json` with the task status and timestamp. Record the model you used in the `task_models` map (e.g., `\"1.2\": \"kimi-k2.6\"`) for post-hoc plan-adherence auditing. Also update `plans/PLANS_REGISTRY.json` (increment `completed_tasks`, update `last_updated` and `last_agent`). If your session is ending (context limit, timeout, throttling), commit progress files and stop cleanly — do NOT try to squeeze in one more task."
+The `dispatch` field is a transient snapshot of the current dispatch — written by the orchestrator immediately BEFORE calling `delegate_task`, and cleared (set to `null`) after the subagent returns. On crash recovery, if `dispatch.status` is `"dispatched"`, the orchestrator checks GitHub for commits matching the task scope before re-dispatching.
+
+The orchestrator also maintains an append-only event log at `plans/{NAME}_DISPATCH_LOG.jsonl`. See the `plan-runner` skill's "Dispatch Log & Crash Recovery" section for the full schema and recovery procedure. Phase 0 task 0.5 should create an empty dispatch log if one doesn't exist.
+
+Worker Instructions must include these state-file ownership rules:
+
+"**State file ownership:** Do NOT read, write, or modify `plans/{NAME}_PROGRESS.json`, `plans/{NAME}_DISPATCH_LOG.jsonl`, or the plan's Task Dependency Graph. These are owned by the orchestrator (plan-runner). Report your results — including which acceptance criteria passed/failed, the commit SHA, and the model you used — in your response. The orchestrator will verify your work and update all state files. This rule prevents merge conflicts from parallel subagents and ensures state transitions are always sequential and consistent.
+
+If your session is ending (context limit, timeout, throttling), commit your code changes and stop cleanly — do NOT try to squeeze in one more task. The orchestrator handles state tracking."
 
 ## Conventional Commits
 
